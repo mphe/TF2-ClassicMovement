@@ -13,7 +13,6 @@
 // #define USE_ACCELERATE_REPLICA
 
 // TODO: backwards speed, doors -.-, autohop duckjump, dos2unix,
-//       remove jump-boost code
 
 // Variables {{{
 new Handle:cvarEnabled   = INVALID_HANDLE;
@@ -39,7 +38,6 @@ new Float:sv_stopspeed = 100.0;
 new Float:oldvel        [MAXPLAYERS + 1][3];
 new Float:realMaxSpeeds [MAXPLAYERS + 1];
 new Float:tmpvel        [MAXPLAYERS + 1];
-new Float:touchvec      [MAXPLAYERS + 1][3];
 new bool:autohop        [MAXPLAYERS + 1];
 new bool:showSpeed      [MAXPLAYERS + 1];
 new bool:inair          [MAXPLAYERS + 1];
@@ -55,12 +53,9 @@ new Float:debugOldspeed;
 new Float:debugProj;
 new Float:debugWishdir[2];
 new Float:debugAcc;
-new Float:debugFriction;
 new Float:debugFrictionDrop;
 new Float:debugAngle;
-#endif
 
-#if defined DEBUG
 new Handle:cvarFricOffset = INVALID_HANDLE;
 new Float:frictionOffset = 0.0;
 #endif
@@ -141,7 +136,7 @@ public ChangeFrictionOffset(Handle:convar, const String:oldValue[], const String
 public OnPluginStart()
 {
     RegConsoleCmd("sm_speed", toggleSpeedo, "Toggle speedometer on/off");
-    RegConsoleCmd("sm_autohop", toggleAutohop, "Toggle autohopping on/off");
+    RegConsoleCmd("sm_togglehop", toggleAutohop, "Toggle autohopping on/off");
 
     cvarEnabled = CreateConVar("qm_enabled", "1",
             "Enable/Disable Quake movement.", FCVAR_PLUGIN);
@@ -153,8 +148,6 @@ public OnPluginStart()
             "Allow jumping while being ducked.", FCVAR_PLUGIN);
     cvarMaxspeed = CreateConVar("qm_maxspeed", "-1.0",
             "The maximum speed players can reach.", FCVAR_PLUGIN);
-    cvarFricOffset = CreateConVar("qm_friction_offset", "0",
-            "Constant subtracted to the friction. Don't use if you don't know what you do.", FCVAR_PLUGIN);
 
     cvarFriction = FindConVar("sv_friction");
     cvarStopspeed = FindConVar("sv_stopspeed");
@@ -171,6 +164,8 @@ public OnPluginStart()
     HookConVarChange(cvarStopspeed, ChangeStopspeed);
 
 #if defined DEBUG
+    cvarFricOffset = CreateConVar("qm_friction_offset", "0",
+            "Constant subtracted to the friction. Don't use if you don't know what you do.", FCVAR_PLUGIN);
     HookConVarChange(cvarFricOffset, ChangeFrictionOffset);
 #endif
 
@@ -202,10 +197,6 @@ public OnPreThink(client)
         SetMaxSpeed(client, speedcap);
 }
 
-public OnThinkPost(client)
-{
-}
-
 public OnPostThink(client)
 {
     DoStuff(client);
@@ -220,7 +211,6 @@ public OnTouch(client, other)
         return;
 
     touched[client] = true;
-    GetVelocity(client, touchvec[client]);
 }
 // }}}
 
@@ -255,10 +245,9 @@ public DoStuff(client)
             wallvec[1] = -normal[0];
             debugAngle = GetAngleBetween(wishdir, wallvec);
 #if defined DEBUG
-            PrintToServer("wallvec: %f, %f touchvec: %f, %f",
-                    wallvec[0], wallvec[1], touchvec[client][0], touchvec[client][1]);
-        }
+            PrintToServer("wallvec: %f, %f", wallvec[0], wallvec[1]);
 #endif
+        }
     }
 
     decl Float:speeddir[2];
@@ -294,21 +283,7 @@ public DoStuff(client)
 
             // Jumping while crouching
             if (duckjump && !jumpPressed[client] && buttons & IN_JUMP && buttons & IN_DUCK)
-            {
                 newvel[2] = JUMP_SPEED;
-                if (newvel[0] == 0.0 && newvel[1] == 0.0)
-                {
-                    decl Float:fwd[3], Float:right[3];
-                    GetViewAngle(client, fwd, right);
-                    for (new i = 0; i < 2; i++)
-                        newvel[i] += fwd[i] * 600;
-                }
-                else
-                {
-                    for (new i = 0; i < 2; i++)
-                        newvel[i] += speeddir[i] * 600;
-                }
-            }
         }
 
         // Double negate to prevent tag mismatch warning
@@ -345,20 +320,18 @@ DoMovement(client, Float:newvel[3], Float:wishdir[3])
         speed = GetAbsVec(newvel);
     }
 
-#if defined DEBUG
-        debugSpeed = speed;
-        for (new i = 0; i < 3; i++)
-            debugVel[i] = newvel[i];
-        for (new i = 0; i < 2; i++)
-            debugWishdir[i] = wishdir[i];
-#endif
-
     tmpvel[client] = speed;
 
     // Speedmeter
     if (showSpeed[client])
     {
 #if defined DEBUG
+        debugSpeed = speed;
+        for (new i = 0; i < 3; i++)
+            debugVel[i] = newvel[i];
+        for (new i = 0; i < 2; i++)
+            debugWishdir[i] = wishdir[i];
+
         PrintCenterText(client, "new: %f\n%f\n%f\nspeeddir: %f;%f\nmaxspeed: %f, %f\noldspeed: %f\nproj: %f\nwishdir: (%f;%f)\nacc: %f\ndrop: %f %f\nangle: %f",
                 debugSpeed, debugVel[0], debugVel[1],
                 debugVelDir[0], debugVelDir[1],
@@ -425,8 +398,8 @@ bool:GetWallNormal(client, const Float:wishdir[3], Float:normal[3])
     GetEntPropVector(client, Prop_Data, "m_vecOrigin", origin);
     GetEntPropVector(client, Prop_Data, "m_vecMins", mins);
     GetEntPropVector(client, Prop_Data, "m_vecMaxs", maxs);
-    origin[2] += MAX_STEP_HEIGHT;
-    maxs[2] -= MAX_STEP_HEIGHT;
+    origin[2] += MAX_STEP_HEIGHT + 1;
+    maxs[2] -= MAX_STEP_HEIGHT + 1;
 
     new Float:dest[3];
     AddVectors(dest, wishdir, dest);
@@ -453,76 +426,6 @@ bool:GetWallNormal(client, const Float:wishdir[3], Float:normal[3])
     return false;
 }
 
-#if defined USE_ACCELERATE_REPLICA
-// NOTE: Does not work (anymore), but keep it for now
-Accelerate(client, Float:newvel[3], Float:speed, const Float:wishdir[3])
-{
-    // currentspeed = DotProduct (pmove.velocity, wishdir);
-    // addspeed = wishspeed - currentspeed;
-    // if (addspeed <= 0)
-    //     return;
-    // accelspeed = accel*frametime*wishspeed;
-    // if (accelspeed > addspeed)
-    //     accelspeed = addspeed;
-
-    new Float:maxspeed = realMaxSpeeds[client];
-    // new Float:currentspeed = DotProduct(oldvel[client], wishdir);
-
-    // quake
-    // new Float:maxaddspeed = maxspeed - currentspeed;
-    // if (maxaddspeed <= 0) // If maxspeed already reached
-    //     return;
-
-    new Float:oldspeed = GetAbsVec(oldvel[client]);
-    // new Float:acc = speed - oldspeed;
-
-    new Float:accvec[2];
-    for (new i = 0; i < 2; i++)
-        accvec[i] = newvel[i] - oldvel[client][i];
-    new Float:acc = GetAbsVec(accvec);
-
-    if (acc < 0.1)
-        return;
-
-    decl Float:speeddir[2];
-    GetUnitVec(accvec, speeddir);
-    // GetUnitVec(newvel, speeddir);
-
-    new Float:currentspeed = DotProduct(oldvel[client], speeddir);
-    // new Float:currentspeed = DotProduct(oldvel[client], wishdir);
-    new Float:maxaddspeed = maxspeed - currentspeed;
-
-    // if (maxaddspeed > 0)
-    {
-        PrintToServer("----------");
-        PrintToServer("oldvel: %f, %f abs: %f", oldvel[client][0], oldvel[client][1], oldspeed);
-        PrintToServer("newvel: %f, %f abs: %f", newvel[0], newvel[1], speed);
-        PrintToServer("accvec: %f, %f abs: %f", accvec[0], accvec[1], acc);
-        PrintToServer("wishdir: %f, %f", wishdir[0], wishdir[1]);
-    }
-
-    DoFriction(client, oldvel[client], false);
-
-    // quake
-    // if (acc > maxaddspeed)
-    //     acc = maxaddspeed;
-
-    if (currentspeed + acc > maxspeed)
-        acc = maxspeed - currentspeed;
-
-    for (new i = 0; i < 2; i++)
-        newvel[i] = oldvel[client][i] + speeddir[i] * acc;
-        // newvel[i] = speeddir[i] * (oldspeed + acc);
-
-#if defined DEBUG
-    debugVelDir[0] = speeddir[0];
-    debugVelDir[1] = speeddir[1];
-    debugOldspeed = oldspeed;
-    debugProj = currentspeed;
-    debugAcc = acc;
-#endif
-}
-#else
 // Calculates the acceleration between the last and the current frame, adds
 // it together the "Quake way" and stores it in newvel.
 // newvel: The (untouched) velocity vector
@@ -553,12 +456,9 @@ Accelerate(client, Float:newvel[3], Float:speed, const Float:wishdir[3])
     debugAcc = acc;
 #endif
 }
-#endif
 
 WallAccelerate(client, Float:newvel[3], Float:speed, const Float:wishdir[3])
 {
-    // DoFriction(client, oldvel[client]);
-
     new Float:maxspeed = realMaxSpeeds[client];
     new Float:oldspeed = GetAbsVec(oldvel[client]);
 
@@ -578,16 +478,12 @@ WallAccelerate(client, Float:newvel[3], Float:speed, const Float:wishdir[3])
 
     DoFriction(client, newvel);
 
-    // if (maxaddspeed > 0)
-    {
-        PrintToServer("----------");
-        PrintToServer("oldvel: %f, %f abs: %f", oldvel[client][0], oldvel[client][1], oldspeed);
-        PrintToServer("newvel: %f, %f abs: %f", newvel[0], newvel[1], speed);
-        // PrintToServer("accvec: %f, %f abs: %f", accvec[0], accvec[1], acc);
-        PrintToServer("wishdir: %f, %f", wishdir[0], wishdir[1]);
-    }
-
 #if defined DEBUG
+    PrintToServer("---------- WallAccelerate");
+    PrintToServer("oldvel: %f, %f abs: %f", oldvel[client][0], oldvel[client][1], oldspeed);
+    PrintToServer("newvel: %f, %f abs: %f", newvel[0], newvel[1], speed);
+    PrintToServer("wishdir: %f, %f", wishdir[0], wishdir[1]);
+
     debugVelDir[0] = speeddir[0];
     debugVelDir[1] = speeddir[1];
     debugOldspeed = oldspeed;
@@ -619,6 +515,20 @@ GetWishdir(client, buttons, Float:wishdir[3])
     }
 }
 
+// For some reason (I assume because the engine's internal friction handling
+// messes it up), wallstrafing behaves strange, meaning the maximum
+// wallstrafe speed is higher or lower as it should be, or the angle to the
+// wall, where the maximum is achived is not about 7-8°.
+// It can be fixed by subtracting a certain value from the friction that
+// this plugin applies (-> WallstrafeAccelerate and DoFriction()).
+// For small speeds (< 280) the optimum angle is still about 3° off, but the
+// maximum achievable speed is correct.
+// Some maxspeeds are still a bit off, e.g. Spy (320 speed) should have a
+// wallstrafe maxspeed of 489 but instead it goes up to 491.
+// This is because I use the linear function below to calculate the offset,
+// rather than hardcoding the measured values that would fit "perfectly".
+// Although the perfectionist in me is screaming that I should fix it,
+// it's good enough for now.
 Float:GetFrictionInterpolation(Float:maxspeed)
 {
     // Measured values:
@@ -638,6 +548,7 @@ Float:GetFriction(client)
     return GetEntPropFloat(client, Prop_Data, "m_flFriction");
 }
 
+// Caluclate the friction to subtract for a certain speed.
 Float:GetFrictionDrop(client, Float:speed)
 {
     new Float:friction = sv_friction * GetFriction(client);
@@ -672,7 +583,6 @@ Float:SetMaxSpeed(client, Float:speed)
 HookClient(client)
 {
     SDKHook(client, SDKHook_PreThink, OnPreThink);
-    SDKHook(client, SDKHook_ThinkPost, OnThinkPost);
     SDKHook(client, SDKHook_PostThink, OnPostThink);
     SDKHook(client, SDKHook_Touch, OnTouch);
 }
