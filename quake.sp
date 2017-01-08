@@ -12,7 +12,7 @@
 #define MAX_STEP_HEIGHT 18 // https://developer.valvesoftware.com/wiki/Team_Fortress_2_Mapper's_Reference#Other_Info
 // #define USE_ACCELERATE_REPLICA
 
-// TODO: backwards speed, doors -.-, autohop duckjump, dos2unix,
+// TODO: backwards speed, doors -.-, autohop duckjump
 
 // Variables {{{
 new Handle:cvarEnabled   = INVALID_HANDLE;
