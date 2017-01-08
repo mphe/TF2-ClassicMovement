@@ -11,16 +11,16 @@
 #define DEBUG
 // #define USE_ACCELERATE_REPLICA
 
-// TODO: backwards speed, wallstrafing, doors -.-, weapon speed boost,
-//       autohop duckjump, dos2unix, tweak wall dist, remove jump-boost code
+// TODO: backwards speed, doors -.-, autohop duckjump, dos2unix,
+//       tweak wall dist, remove jump-boost code
 
 // Variables {{{
-new Handle:cvarEnabled  = INVALID_HANDLE;
-new Handle:cvarAutohop  = INVALID_HANDLE;
-new Handle:cvarSpeedo   = INVALID_HANDLE;
-new Handle:cvarMaxspeed = INVALID_HANDLE;
-new Handle:cvarDuckJump = INVALID_HANDLE;
-new Handle:cvarFriction = INVALID_HANDLE;
+new Handle:cvarEnabled   = INVALID_HANDLE;
+new Handle:cvarAutohop   = INVALID_HANDLE;
+new Handle:cvarSpeedo    = INVALID_HANDLE;
+new Handle:cvarMaxspeed  = INVALID_HANDLE;
+new Handle:cvarDuckJump  = INVALID_HANDLE;
+new Handle:cvarFriction  = INVALID_HANDLE;
 new Handle:cvarStopspeed = INVALID_HANDLE;
 
 // Global settings
@@ -142,17 +142,17 @@ public OnPluginStart()
     RegConsoleCmd("sm_autohop", toggleAutohop, "Toggle autohopping on/off");
 
     cvarEnabled = CreateConVar("qm_enabled", "1",
-            "Enable/Disable Quake movement", FCVAR_PLUGIN);
+            "Enable/Disable Quake movement.", FCVAR_PLUGIN);
     cvarAutohop = CreateConVar("qm_autohop", "1",
-            "Automatically jump while holding jump", FCVAR_PLUGIN);
+            "Automatically jump while holding jump.", FCVAR_PLUGIN);
     cvarSpeedo = CreateConVar("qm_speedo", "0",
-            "Show speedometer", FCVAR_PLUGIN);
+            "Show speedometer.", FCVAR_PLUGIN);
     cvarDuckJump = CreateConVar("qm_duckjump", "1",
-            "Allow jumping while being ducked", FCVAR_PLUGIN);
+            "Allow jumping while being ducked.", FCVAR_PLUGIN);
     cvarMaxspeed = CreateConVar("qm_maxspeed", "-1.0",
-            "The maximum speed players can reach", FCVAR_PLUGIN);
+            "The maximum speed players can reach.", FCVAR_PLUGIN);
     cvarFricOffset = CreateConVar("qm_friction_offset", "0",
-            "Constant added to the friction", FCVAR_PLUGIN);
+            "Constant subtracted to the friction. Don't use if you don't know what you do.", FCVAR_PLUGIN);
 
     cvarFriction = FindConVar("sv_friction");
     cvarStopspeed = FindConVar("sv_stopspeed");
@@ -195,17 +195,9 @@ public OnPreThink(client)
 
     realMaxSpeeds[client] = GetMaxSpeed(client);
     if (speedcap < 0.0)
-    {
-        // if (!inair[client])
-        //     SetMaxSpeed(client, 491.0);
-        // else
-            SetMaxSpeed(client, 100000.0);
-        // SetMaxSpeed(client, realMaxSpeeds[client] + GetAbsVec(oldvel[client]));
-    }
+        SetMaxSpeed(client, 100000.0);
     else
-    {
         SetMaxSpeed(client, speedcap);
-    }
 }
 
 public OnThinkPost(client)
@@ -215,10 +207,6 @@ public OnThinkPost(client)
 public OnPostThink(client)
 {
     DoStuff(client);
-}
-
-public OnPostThinkPost(client)
-{
 }
 
 public OnTouch(client, other)
@@ -231,13 +219,6 @@ public OnTouch(client, other)
 
     touched[client] = true;
     GetVelocity(client, touchvec[client]);
-    // DoWallstrafing(client, newvel, wishdir);
-    // touched[client] = false;
-    // decl Float:vel[3];
-    // GetVelocity(client, vel);
-    // SubtractVectors(vel, touchvec[client], vel); // acc vector
-    // for (new i = 0; i < 2; i++)
-    //     touchvec[client][i] = oldvel[client][i] + vel[i];
 }
 // }}}
 
@@ -264,15 +245,6 @@ public DoStuff(client)
     { // Wall collision
         if (touched[client])
             touched[client] = GetWallVec(client, wishdir, wallvec);
-
-        if (touched[client])
-        {
-            // for (new i = 0; i < 2; i++)
-            //     newvel[i] = touchvec[client][i];
-// #if defined DEBUG
-//             PrintToServer("vec: %f, %f", newvel[0], newvel[1]);
-// #endif
-        }
     }
 
     decl Float:speeddir[2];
@@ -286,21 +258,22 @@ public DoStuff(client)
         }
         else
         {
-            new bool:land = false;
+            landframe[client] = false;
             if (inair[client])
             {
                 // Pressing jump while landing?
                 if (autohop[client] && buttons & IN_JUMP)
                     newvel[2] = JUMP_SPEED;
                 inair[client] = false;
-                land = true;
+                landframe[client] = true;
             }
-            landframe[client] = land;
 
             // Restore speed if above 520
+            // TODO: Check if this friction interferes with the friction
+            //       applied when wallstrafing
             if (tmpvel[client] > 520.0)
             {
-                new Float:drop = land ? 0.0 : GetFrictionDrop(client, tmpvel[client]);
+                new Float:drop = landframe[client] ? 0.0 : GetFrictionDrop(client, tmpvel[client]);
                 for (new i = 0; i < 2; i++)
                     newvel[i] = speeddir[i] * (tmpvel[client] - drop);
             }
@@ -324,7 +297,7 @@ public DoStuff(client)
             }
         }
 
-        // (Double negate to prevent tag mismatch warning)
+        // Double negate to prevent tag mismatch warning
         jumpPressed[client] = !!(buttons & IN_JUMP);
     }
     // }}}
@@ -350,17 +323,10 @@ DoMovement(client, Float:newvel[3], Float:wallvec[2], Float:wishdir[3])
     // TODO: Check if this expression is right and document why
     if (speed != 0.0 && wishdir[0] != 0.0 && wishdir[1] != 0.0)
     {
-        // if (!touched[client])
-            // DoFriction(client, newvel);
-            // DoFriction(client, oldvel[client]);
-
         if (touched[client])
             WallAccelerate(client, newvel, speed, wishdir);
         else
             Accelerate(client, newvel, speed, wishdir);
-
-        // DO THIS HERE, OTHERWISE THE DEBUG OUTPUT SHOWS THE WRONG SPEED!
-        // DoWallstrafing(client, newvel, wallvec);
 
         speed = GetAbsVec(newvel);
     }
@@ -396,22 +362,8 @@ DoMovement(client, Float:newvel[3], Float:wallvec[2], Float:wishdir[3])
     }
 }
 
-DoWallstrafing(client, Float:newvel[3], Float:wallvec[2])
-{
-    if (!touched[client])
-        return;
-
-    new Float:newspeed = DotProduct(newvel, wallvec);
-    // new Float:newspeed = DotProduct(newvel, wallvec) - 18.0;
-    // new Float:newspeed = GetAbsVec(newvel);
-
-    for (new i = 0; i < 2; i++)
-        newvel[i] = wallvec[i] * newspeed;
-}
-
 DoFriction(client, Float:vel[3], bool:interpolate = true)
 {
-    // TODO: on land check
     if (inair[client] || landframe[client])
         return;
 
@@ -489,6 +441,7 @@ bool:GetWallVec(client, const Float:dir[3], Float:wallvec[2])
 }
 
 #if defined USE_ACCELERATE_REPLICA
+// NOTE: Does not work (anymore), but keep it for now
 Accelerate(client, Float:newvel[3], Float:speed, const Float:wishdir[3])
 {
     // currentspeed = DotProduct (pmove.velocity, wishdir);
@@ -597,9 +550,6 @@ WallAccelerate(client, Float:newvel[3], Float:speed, const Float:wishdir[3])
     new Float:oldspeed = GetAbsVec(oldvel[client]);
 
     new Float:acc = speed - oldspeed;
-
-    // new Float:revfriction = GetFrictionDrop(client, oldspeed);
-    // oldspeed += revfriction;
 
     // New vel was clipped by the engine, so the following works
     new Float:currentspeed = DotProduct(newvel, wishdir);
@@ -711,7 +661,6 @@ HookClient(client)
     SDKHook(client, SDKHook_PreThink, OnPreThink);
     SDKHook(client, SDKHook_ThinkPost, OnThinkPost);
     SDKHook(client, SDKHook_PostThink, OnPostThink);
-    SDKHook(client, SDKHook_PostThinkPost, OnPostThinkPost);
     SDKHook(client, SDKHook_Touch, OnTouch);
 }
 
