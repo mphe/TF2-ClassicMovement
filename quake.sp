@@ -9,10 +9,11 @@
 #define FRAMETIME 0.015 // 66.666666
 #define PI 3.14159
 #define DEBUG
+#define MAX_STEP_HEIGHT 18 // https://developer.valvesoftware.com/wiki/Team_Fortress_2_Mapper's_Reference#Other_Info
 // #define USE_ACCELERATE_REPLICA
 
 // TODO: backwards speed, doors -.-, autohop duckjump, dos2unix,
-//       tweak wall dist, remove jump-boost code
+//       remove jump-boost code
 
 // Variables {{{
 new Handle:cvarEnabled   = INVALID_HANDLE;
@@ -56,6 +57,7 @@ new Float:debugWishdir[2];
 new Float:debugAcc;
 new Float:debugFriction;
 new Float:debugFrictionDrop;
+new Float:debugAngle;
 #endif
 
 #if defined DEBUG
@@ -241,10 +243,22 @@ public DoStuff(client)
     decl Float:wishdir[3];
     GetWishdir(client, buttons, wishdir);
 
-    decl Float:wallvec[2];
-    { // Wall collision
+    if (touched[client])
+    {
+        decl Float:normal[3];
+        touched[client] = GetWallNormal(client, wishdir, normal);
+
         if (touched[client])
-            touched[client] = GetWallVec(client, wishdir, wallvec);
+        {
+            decl Float:wallvec[2];
+            wallvec[0] = normal[1];
+            wallvec[1] = -normal[0];
+            debugAngle = GetAngleBetween(wishdir, wallvec);
+#if defined DEBUG
+            PrintToServer("wallvec: %f, %f touchvec: %f, %f",
+                    wallvec[0], wallvec[1], touchvec[client][0], touchvec[client][1]);
+        }
+#endif
     }
 
     decl Float:speeddir[2];
@@ -302,7 +316,7 @@ public DoStuff(client)
     }
     // }}}
 
-    DoMovement(client, newvel, wallvec, wishdir);
+    DoMovement(client, newvel, wishdir);
 
     if ((touched[client] || !inair[client]) && (newvel[0] != realvel[0] || newvel[1] != realvel[1] || newvel[2] != realvel[2]))
         TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, newvel);
@@ -316,7 +330,7 @@ public DoStuff(client)
     SetMaxSpeed(client, realMaxSpeeds[client]);
 }
 
-DoMovement(client, Float:newvel[3], Float:wallvec[2], Float:wishdir[3])
+DoMovement(client, Float:newvel[3], Float:wishdir[3])
 {
     new Float:speed = GetAbsVec(newvel);
 
@@ -354,7 +368,7 @@ DoMovement(client, Float:newvel[3], Float:wallvec[2], Float:wishdir[3])
                 debugWishdir[0], debugWishdir[1],
                 debugAcc,
                 GetFriction(client), debugFrictionDrop,
-                GetAngleBetween(wishdir, wallvec)
+                debugAngle
                 );
 #else
         PrintCenterText(client, "%f", speed);
@@ -400,43 +414,42 @@ GetViewAngle(client, Float:fwd[3], Float:right[3])
     right[2] = 0.0;
 }
 
-bool:GetWallVec(client, const Float:dir[3], Float:wallvec[2])
+// Checks for collisions in a given direction using the client's bounding box.
+// If a collision was found, the collding entity's normal is stored in the
+// given normal vector.
+// Additionally, it will check if the colliding object is actually a wall.
+// If yes, it will return true, otherwise false.
+bool:GetWallNormal(client, const Float:wishdir[3], Float:normal[3])
 {
-    decl Float:origin[3], Float:angles[3];
+    decl Float:origin[3], Float:mins[3], Float:maxs[3];
+    GetEntPropVector(client, Prop_Data, "m_vecOrigin", origin);
+    GetEntPropVector(client, Prop_Data, "m_vecMins", mins);
+    GetEntPropVector(client, Prop_Data, "m_vecMaxs", maxs);
+    origin[2] += MAX_STEP_HEIGHT;
+    maxs[2] -= MAX_STEP_HEIGHT;
 
-    // GetClientAbsOrigin(client, origin);
-    GetClientEyePosition(client, origin);
-    GetVectorAngles(dir, angles);
+    new Float:dest[3];
+    AddVectors(dest, wishdir, dest);
+    ScaleVector(dest, 10.0);
+    AddVectors(origin, dest, dest);
 
-    new Handle:ray = TR_TraceRayFilterEx(origin, angles, MASK_SHOT,
-            RayType_Infinite, TR_FilterSelf, client);
+    // "Trace on" - Shirou
+    new Handle:trace = TR_TraceHullFilterEx(origin, dest, mins, maxs,
+            MASK_SHOT, TR_FilterSelf, client);
 
-    if (TR_DidHit(ray))
+    if (TR_DidHit(trace))
     {
-        decl Float:normal[3], Float:endpos[3];
-        TR_GetPlaneNormal(ray, normal);
-        TR_GetEndPosition(endpos, ray);
-        new Float:dist = GetVectorDistance(origin, endpos, false);
-
-        wallvec[0] = normal[1];
-        wallvec[1] = -normal[0];
-
-#if defined DEBUG
-        PrintToServer("wallvec: %f, %f dist: %f touchvec: %f, %f",
-                wallvec[0], wallvec[1],
-                dist,
-                touchvec[client][0], touchvec[client][1]);
-#endif
+        TR_GetPlaneNormal(trace, normal);
 
         // If the z part is not 0, it's not a wall.
-        if (normal[2] == 0.0 && dist < 60.0)
+        if (normal[2] == 0.0)
         {
-            CloseHandle(ray);
+            CloseHandle(trace);
             return true;
         }
     }
 
-    CloseHandle(ray);
+    CloseHandle(trace);
     return false;
 }
 
