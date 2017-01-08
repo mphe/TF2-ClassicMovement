@@ -5,8 +5,9 @@
 #include <tf2_stocks>
 
 #define JUMP_SPEED 300.0
+// #define DEBUG true
 
-// TODO: backwards speed
+// TODO: backwards speed, wallstrafing, doors -.-, weapon speed boost, autohop duckjump, dos2unix, tweak wall dist
 
 // Variables {{{
 new Handle:cvarEnabled  = INVALID_HANDLE;
@@ -14,6 +15,8 @@ new Handle:cvarAutohop  = INVALID_HANDLE;
 new Handle:cvarSpeedo   = INVALID_HANDLE;
 new Handle:cvarMaxspeed = INVALID_HANDLE;
 new Handle:cvarDuckJump = INVALID_HANDLE;
+new Handle:cvarFriction = INVALID_HANDLE;
+new Handle:cvarStopspeed = INVALID_HANDLE;
 
 // Global settings
 new bool:enabled = true;
@@ -21,17 +24,21 @@ new bool:defaultAutohop = true;
 new bool:defaultSpeedo = false;
 new bool:duckjump = true;
 new Float:speedcap = -1.0;
+new Float:sv_friction = 4.0;
+new Float:sv_stopspeed = 100.0;
 
 // Player data
 // Arrays are 1 bigger than MAXPLAYERS for the convenience of not having to
 // write client - 1 every time when using a client id as index.
-new Float:oldvel[MAXPLAYERS + 1][2];
-new Float:tmpvel[MAXPLAYERS + 1][2];
+new Float:oldvel[MAXPLAYERS + 1][3];
 new Float:realMaxSpeeds[MAXPLAYERS + 1];
+new Float:tmpvel[MAXPLAYERS + 1];
+new Float:touchvec[MAXPLAYERS + 1][3];
 new bool:autohop[MAXPLAYERS + 1];
 new bool:showSpeed[MAXPLAYERS + 1];
 new bool:inair[MAXPLAYERS + 1];
 new bool:jumpPressed[MAXPLAYERS + 1];
+new bool:touched[MAXPLAYERS + 1];
 
 public Plugin:myinfo = {
     name            = "Quake Movement",
@@ -86,6 +93,16 @@ public ChangeMaxspeed(Handle:convar, const String:oldValue[], const String:newVa
 {
     speedcap = GetConVarFloat(convar);
 }
+
+public ChangeFriction(Handle:convar, const String:oldValue[], const String:newValue[])
+{
+    sv_friction = GetConVarFloat(convar);
+}
+
+public ChangeStopspeed(Handle:convar, const String:oldValue[], const String:newValue[])
+{
+    sv_stopspeed = GetConVarFloat(convar);
+}
 // }}}
 
 // Events {{{
@@ -105,15 +122,23 @@ public OnPluginStart()
     cvarMaxspeed = CreateConVar("qm_maxspeed", "-1.0",
             "The maximum speed players can reach", FCVAR_PLUGIN);
 
+    cvarFriction = FindConVar("sv_friction");
+    cvarStopspeed = FindConVar("sv_stopspeed");
+
+    sv_friction = GetConVarFloat(cvarFriction);
+    sv_stopspeed = GetConVarFloat(cvarStopspeed);
+
     HookConVarChange(cvarEnabled, ChangeEnabled);
     HookConVarChange(cvarAutohop, ChangeAutohop);
     HookConVarChange(cvarSpeedo, ChangeSpeedo);
     HookConVarChange(cvarDuckJump, ChangeDuckJump);
     HookConVarChange(cvarMaxspeed, ChangeMaxspeed);
+    HookConVarChange(cvarFriction, ChangeFriction);
+    HookConVarChange(cvarStopspeed, ChangeStopspeed);
 
     for (new i = 1; i <= MaxClients; i++)
     {
-        if (Client_IsValid(i))
+        if (Client_IsValid(i) && IsClientInGame(i))
         {
             SetupClient(i);
             HookClient(i);
@@ -129,115 +154,162 @@ public OnClientPutInServer(client)
 
 public OnPreThink(client)
 {
-    // Increase the max speed to be always way above the current speed to
-    // bypass the engine's capping mechanism.
-    if (enabled)
+    if (!enabled)
+        return;
+
+    // decl Float:newvel[3];
+    // GetVelocity(client, newvel);
+    // new Float:speed = GetAbsVec(newvel);
+    // if (speed != tmpvel[client])
+    //     PrintToServer("pre speed: %f", speed);
+
+    realMaxSpeeds[client] = GetMaxSpeed(client);
+    if (speedcap < 0.0)
     {
-        realMaxSpeeds[client] = GetMaxSpeed(client);
-        if (speedcap < 0.0)
-            SetMaxSpeed(client, realMaxSpeeds[client] + GetAbsVec(oldvel[client]));
-        else
-            SetMaxSpeed(client, speedcap);
-    }
-
-    decl Float:newvel[3], Float:speed;
-    GetEntPropVector(client, Prop_Data, "m_vecVelocity", newvel);
-    speed = GetAbsVec(newvel);
-
-    if (speed > 400.0)
-    {
-        decl Float:speeddir[2];
-        GetUnitVec(newvel, speeddir);
-        new Float:sub = speed - 400.0;
-
-        for (new i = 0; i < 2; i++)
-        {
-            tmpvel[client][i] = sub * speeddir[i];
-            newvel[i] -= sub * speeddir[i];
-        }
-        TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, newvel);
+        // if (!inair[client])
+        //     SetMaxSpeed(client, 491.0);
+        // else
+            SetMaxSpeed(client, 100000.0);
+        // SetMaxSpeed(client, realMaxSpeeds[client] + GetAbsVec(oldvel[client]));
     }
     else
     {
-        for (new i = 0; i < 2; i++)
-            tmpvel[client][i] = 0.0;
+        SetMaxSpeed(client, speedcap);
     }
+}
+
+public OnThinkPost(client)
+{
 }
 
 public OnPostThink(client)
 {
+    DoStuff(client);
+}
+
+public OnPostThinkPost(client)
+{
+}
+
+public Action:OnStartTouch(client, other)
+{
+    // if (!enabled || !IsClientInGame(client) || !IsPlayerAlive(client))
+    //     return Plugin_Continue;
+    //
+    // if (other > 0 && other <= MaxClients)
+    //     return Plugin_Continue;
+    //
+    // touched[client] = true;
+    //
+    // decl Float:vel[3];
+    // GetVelocity(client, vel);
+    // GetVectorAngles(vel, touchvec[client]);
+    // return Plugin_Continue;
+    // GetVelocity(client, touchvec[client]);
+    return Plugin_Continue;
+}
+
+public OnTouch(client, other)
+{
     if (!enabled || !IsClientInGame(client) || !IsPlayerAlive(client))
         return;
 
-    new Float:diff;
-    diff = GetMaxSpeed(client) - (realMaxSpeeds[client] + GetAbsVec(oldvel[client]))
+    if (other > 0 && other <= MaxClients)
+        return;
 
-    decl Float:newvel[3], Float:realspeed;
-    GetEntPropVector(client, Prop_Data, "m_vecVelocity", newvel);
-    realspeed = GetAbsVec(newvel);
+    touched[client] = true;
+    GetVelocity(client, touchvec[client]);
+    // DoWallstrafing(client, newvel, wishdir);
+    // touched[client] = false;
+    // decl Float:vel[3];
+    // GetVelocity(client, vel);
+    // SubtractVectors(vel, touchvec[client], vel); // acc vector
+    // for (new i = 0; i < 2; i++)
+    //     touchvec[client][i] = oldvel[client][i] + vel[i];
+}
 
-    for (new i = 0; i < 2; i++)
-        newvel[i] += tmpvel[client][i];
+public DoStuff(client)
+{
+    if (!enabled || !IsClientInGame(client) || !IsPlayerAlive(client))
+        return;
 
     new buttons = GetClientButtons(client);
-    CheckJumping(client, buttons, newvel);
 
-    new Float:speed = GetAbsVec(newvel);
+    decl Float:newvel[3], Float:realvel[3];
+    GetVelocity(client, newvel);
+    GetVelocity(client, realvel);
 
-    // Speed control
-    if (speed != 0.0)
+    decl Float:wishdir[3];
+    GetWishdir(client, buttons, wishdir);
+
+    if (touched[client])
+        DoWallstrafing(client, newvel, wishdir);
+
+    decl Float:speeddir[2];
+    GetUnitVec(newvel, speeddir);
+
+    // collision ground {{{
     {
-        new Float:maxspeed = realMaxSpeeds[client];
-        new Float:oldspeed = GetAbsVec(oldvel[client]);
-        new Float:acc = speed - oldspeed;
-
-        decl Float:speeddir[2];
-        GetUnitVec(newvel, speeddir);
-
-        // Stores in which direction the player wants to move
-        decl Float:wishdir[3];
-        GetWishdir(client, buttons, wishdir);
-
-        new Float:proj = DotProduct(oldvel[client], wishdir);
-        if (proj + acc > maxspeed)
-            acc = maxspeed - proj;
-
-        for (new i = 0; i < 2; i++)
-            newvel[i] = speeddir[i] * (oldspeed + acc);
-
-        speed = GetAbsVec(newvel);
-
-        // Debug speedometer
-        if (showSpeed[client])
+        if (GetEntPropEnt(client, Prop_Send, "m_hGroundEntity") == -1)
         {
-            PrintCenterText(client, "new: %f\n%f\n%f\n%f\nrealspeed: %f\ntmpvel: %f; %f\nspeeddir: %f;%f\nmaxspeed: %f, %f\noldspeed: %f\nproj: %f\nwishdir: (%f;%f)\nacc: %f\ndiff: %f",
-                    (speed), (newvel[0]), (newvel[1]), (newvel[2]),
-                    realspeed,
-                    tmpvel[client][0], tmpvel[client][1],
-                    (speeddir[0]), (speeddir[1]),
-                    (maxspeed), (GetMaxSpeed(client)),
-                    oldspeed,
-                    proj,
-                    wishdir[0], wishdir[1],
-                    acc,
-                    diff
-                    );
+            inair[client] = true;
+        }
+        else
+        {
+            new bool:land = false;
+            if (inair[client])
+            {
+                // Pressing jump while landing?
+                if (autohop[client] && buttons & IN_JUMP)
+                    newvel[2] = JUMP_SPEED;
+                inair[client] = false;
+                land = true;
+            }
+
+            // Restore speed if above 520
+            if (tmpvel[client] > 520.0)
+            {
+                new Float:drop = land ? 0.0 : GetFrictionDrop(client, tmpvel[client]);
+                for (new i = 0; i < 2; i++)
+                    newvel[i] = speeddir[i] * (tmpvel[client] - drop);
+            }
+
+            // Jumping while crouching
+            if (duckjump && !jumpPressed[client] && buttons & IN_JUMP && buttons & IN_DUCK)
+            {
+                newvel[2] = JUMP_SPEED;
+                if (newvel[0] == 0.0 && newvel[1] == 0.0)
+                {
+                    decl Float:fwd[3], Float:right[3];
+                    GetViewAngle(client, fwd, right);
+                    for (new i = 0; i < 2; i++)
+                        newvel[i] += fwd[i] * 600;
+                }
+                else
+                {
+                    for (new i = 0; i < 2; i++)
+                        newvel[i] += speeddir[i] * 600;
+                }
+            }
         }
 
+        // (Double negate to prevent tag mismatch warning)
+        jumpPressed[client] = !!(buttons & IN_JUMP);
     }
+    // }}}
 
-    TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, newvel);
+    DoMovement(client, newvel, buttons, wishdir, realvel);
 
-    // Speedmeter
-    // if (showSpeed[client])
-    //     PrintCenterText(client, "%f", speed);
+    if ((touched[client] || !inair[client]) && (newvel[0] != realvel[0] || newvel[1] != realvel[1] || newvel[2] != realvel[2]))
+        TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, newvel);
 
-    for (new i = 0; i < 2; i++)
+    for (new i = 0; i < 3; i++)
         oldvel[client][i] = newvel[i];
 
+    touched[client] = false;
+
     // Reset max speed
-    // SetMaxSpeed(client, realMaxSpeeds[client]);
-    SetMaxSpeed(client, GetMaxSpeed(client));
+    SetMaxSpeed(client, realMaxSpeeds[client]);
 }
 
 // }}}
@@ -280,30 +352,135 @@ GetWishdir(client, buttons, Float:wishdir[3])
     }
 }
 
-// Handles autohop and jumping while crouched
-CheckJumping(client, buttons, Float:newvel[3])
+Float:GetFriction(client)
 {
-    if (GetEntPropEnt(client, Prop_Send, "m_hGroundEntity") == -1)
+    // Not sure if this will ever be different than 1.0, but let's use this
+    // anyway just to be sure.
+    return GetEntPropFloat(client, Prop_Data, "m_flFriction");
+}
+
+Float:GetFrictionDrop(client, Float:speed)
+{
+    new Float:friction = sv_friction * GetFriction(client);
+    new Float:control = (speed < sv_stopspeed) ? sv_stopspeed : speed;
+    return control * friction * 0.0151515;
+    // return control * friction * (GetTickedTime() - frametime[client]);
+}
+
+DoMovement(client, Float:newvel[3], buttons, Float:wishdir[3], Float:realvel[3])
+{
+    new Float:speed = GetAbsVec(newvel);
+
+    if (speed != 0.0 && wishdir[0] != 0.0 && wishdir[1] != 0.0)
     {
-        inair[client] = true;
+        new Float:maxspeed = realMaxSpeeds[client];
+        new Float:oldspeed = GetAbsVec(oldvel[client]);
+        new Float:acc = speed - oldspeed;
+
+        decl Float:speeddir[2];
+        // GetUnitVec(realvel, speeddir);
+        if (!touched[client])
+            GetUnitVec(newvel, speeddir);
+        else
+            GetUnitVec(touchvec[client], speeddir);
+
+        new Float:proj = DotProduct(oldvel[client], wishdir);
+        if (proj + acc > maxspeed)
+            acc = maxspeed - proj;
+
+        for (new i = 0; i < 2; i++)
+            newvel[i] = speeddir[i] * (oldspeed + acc);
+
+        // if (touched[client])
+        //     DoWallstrafing(client, newvel, wishdir);
+
+        speed = GetAbsVec(newvel);
+
+        // Debug speedometer
+        if (showSpeed[client])
+        {
+            PrintCenterText(client, "new: %f\n%f\n%f\nspeeddir: %f;%f\nmaxspeed: %f, %f\noldspeed: %f\nproj: %f\nwishdir: (%f;%f)\nacc: %f\ndrop: %f %f",
+                    (speed), (newvel[0]), (newvel[1]),
+                    (speeddir[0]), (speeddir[1]),
+                    (maxspeed), (GetMaxSpeed(client)),
+                    oldspeed,
+                    proj,
+                    wishdir[0], wishdir[1],
+                    acc,
+                    GetFriction(client), GetFrictionDrop(client, speed)
+                    );
+        }
     }
-    else
+
+    tmpvel[client] = speed;
+
+    // Speedmeter
+    if (false && showSpeed[client])
+        PrintCenterText(client, "%f", speed);
+}
+
+DoWallstrafing(client, Float:newvel[3], Float:wishdir[3])
+{
+    decl Float:origin[3], Float:angles[3];
+
+    // GetClientAbsOrigin(client, origin);
+    GetClientEyePosition(client, origin);
+    GetVectorAngles(wishdir, angles);
+
+    new Handle:ray = TR_TraceRayFilterEx(origin, angles, MASK_SOLID,
+            RayType_Infinite, TR_FilterSelf, client);
+
+    if (TR_DidHit(ray))
     {
-        // Pressing jump while landing?
-        if (inair[client] && autohop[client] && buttons & IN_JUMP)
-            newvel[2] = JUMP_SPEED;
+        decl Float:normal[3], Float:wallvec[2], Float:endpos[3];
+        TR_GetPlaneNormal(ray, normal);
+        TR_GetEndPosition(endpos, ray);
+        new Float:dist = GetVectorDistance(origin, endpos, false);
 
-        inair[client] = false;
+        // If the z part is not 0, it's not a wall.
+        if (normal[2] == 0.0 && dist < 40.0)
+        {
+            wallvec[0] = normal[1];
+            wallvec[1] = -normal[0];
 
-        // Jumping while crouching
-        if (duckjump && !jumpPressed[client] && buttons & IN_JUMP && buttons & IN_DUCK)
-            newvel[2] = JUMP_SPEED;
+            // for (new i = 0; i < 2; i++)
+            //     newvel[i] = touchvec[client][i];
+
+            // new Float:newspeed = DotProduct(newvel, wallvec);
+            // new Float:newspeed = DotProduct(touchvec[client], wallvec);
+            new Float:newspeed = DotProduct(oldvel[client], wallvec);
+
+            // if (newspeed < 0)
+            //     newspeed = newspeed < -488.0 ? -488.0 : newspeed;
+            // else
+            //     newspeed = newspeed > 488.0 ? 488.0 : newspeed;
+            //
+            for (new i = 0; i < 2; i++)
+            {
+                newvel[i] = wallvec[i] * newspeed;
+                // oldvel[client][i] = wallvec[i] * newspeed;
+                // oldvel[client][i] = touchvec[client][i];
+            }
+                // oldvel[client][i] = wallvec[i] * newspeed;
+
+            PrintToServer("wallvec: %f, %f dist: %f touchvec: %f, %f",
+                    wallvec[0], wallvec[1],
+                    dist,
+                    touchvec[client][0], touchvec[client][1]);
+        }
     }
 
-    // This needs to come after the jump checking in the block above, so
-    // that this variable reflects the state of the last frame.
-    // (Double negate to prevent tag mismatch warning)
-    jumpPressed[client] = !!(buttons & IN_JUMP);
+    CloseHandle(ray);
+}
+
+public bool:TR_FilterSelf(ent, mask, any:data)
+{
+    return ent != data
+}
+
+GetVelocity(client, Float:vel[3])
+{
+    GetEntPropVector(client, Prop_Data, "m_vecVelocity", vel);
 }
 
 Float:GetMaxSpeed(client)
@@ -318,8 +495,12 @@ Float:SetMaxSpeed(client, Float:speed)
 
 HookClient(client)
 {
-    SDKHook(client, SDKHook_PostThink, OnPostThink);
     SDKHook(client, SDKHook_PreThink, OnPreThink);
+    SDKHook(client, SDKHook_ThinkPost, OnThinkPost);
+    SDKHook(client, SDKHook_PostThink, OnPostThink);
+    SDKHook(client, SDKHook_PostThinkPost, OnPostThinkPost);
+    SDKHook(client, SDKHook_Touch, OnTouch);
+    SDKHook(client, SDKHook_StartTouch, OnStartTouch);
 }
 
 SetupClient(client)
