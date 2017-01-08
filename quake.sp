@@ -415,7 +415,9 @@ bool:GetWallNormal(client, const Float:wishdir[3], Float:normal[3])
         TR_GetPlaneNormal(trace, normal);
 
         // If the z part is not 0, it's not a wall.
-        if (normal[2] == 0.0)
+        // The second check is necessary because automatic doors sometimes
+        // have a null normal apparently.
+        if (normal[2] == 0.0 && (normal[0] != 0.0 || normal[1] != 0.0))
         {
             CloseHandle(trace);
             return true;
