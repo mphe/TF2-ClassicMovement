@@ -5,14 +5,16 @@
 #include <tf2_stocks>
 
 #pragma semicolon 1
+
 #define JUMP_SPEED 300.0
 #define FRAMETIME 0.015 // 66.666666
 #define PI 3.14159
 #define DEBUG
 #define MAX_STEP_HEIGHT 18 // https://developer.valvesoftware.com/wiki/Team_Fortress_2_Mapper's_Reference#Other_Info
-// #define USE_ACCELERATE_REPLICA
 
-// TODO: backwards speed, doors -.-, autohop duckjump
+// TODO: backwards speed, doors -.-, autohop duckjump, disable for spectators
+//       version cvar, spy invisibility (fuck -.-),
+//       check if airtime is skippable
 
 // Variables {{{
 new Handle:cvarEnabled   = INVALID_HANDLE;
@@ -138,16 +140,11 @@ public OnPluginStart()
     RegConsoleCmd("sm_speed", toggleSpeedo, "Toggle speedometer on/off");
     RegConsoleCmd("sm_togglehop", toggleAutohop, "Toggle autohopping on/off");
 
-    cvarEnabled = CreateConVar("qm_enabled", "1",
-            "Enable/Disable Quake movement.", FCVAR_PLUGIN);
-    cvarAutohop = CreateConVar("qm_autohop", "1",
-            "Automatically jump while holding jump.", FCVAR_PLUGIN);
-    cvarSpeedo = CreateConVar("qm_speedo", "0",
-            "Show speedometer.", FCVAR_PLUGIN);
-    cvarDuckJump = CreateConVar("qm_duckjump", "1",
-            "Allow jumping while being ducked.", FCVAR_PLUGIN);
-    cvarMaxspeed = CreateConVar("qm_maxspeed", "-1.0",
-            "The maximum speed players can reach.", FCVAR_PLUGIN);
+    cvarEnabled  = CreateConVar("qm_enabled",     "1", "Enable/Disable Quake movement.");
+    cvarAutohop  = CreateConVar("qm_autohop",     "1", "Automatically jump while holding jump.");
+    cvarSpeedo   = CreateConVar("qm_speedo",      "0", "Show speedometer.");
+    cvarDuckJump = CreateConVar("qm_duckjump",    "1", "Allow jumping while being ducked.");
+    cvarMaxspeed = CreateConVar("qm_maxspeed", "-1.0", "The maximum speed players can reach.");
 
     cvarFriction = FindConVar("sv_friction");
     cvarStopspeed = FindConVar("sv_stopspeed");
@@ -165,7 +162,7 @@ public OnPluginStart()
 
 #if defined DEBUG
     cvarFricOffset = CreateConVar("qm_friction_offset", "0",
-            "Constant subtracted to the friction. Don't use if you don't know what you do.", FCVAR_PLUGIN);
+            "Constant subtracted to the friction. Don't use if you don't know what you do.");
     HookConVarChange(cvarFricOffset, ChangeFrictionOffset);
 #endif
 
@@ -233,25 +230,23 @@ public DoStuff(client)
     decl Float:wishdir[3];
     GetWishdir(client, buttons, wishdir);
 
+    // Check if colliding with a wall
     if (touched[client])
     {
         decl Float:normal[3];
         touched[client] = GetWallNormal(client, wishdir, normal);
 
+#if defined DEBUG
         if (touched[client])
         {
             decl Float:wallvec[2];
             wallvec[0] = normal[1];
             wallvec[1] = -normal[0];
             debugAngle = GetAngleBetween(wishdir, wallvec);
-#if defined DEBUG
             PrintToServer("wallvec: %f, %f", wallvec[0], wallvec[1]);
-#endif
         }
+#endif
     }
-
-    decl Float:speeddir[2];
-    GetUnitVec(newvel, speeddir);
 
     // collision ground {{{
     {
@@ -276,6 +271,8 @@ public DoStuff(client)
             //       applied when wallstrafing
             if (tmpvel[client] > 520.0)
             {
+                decl Float:speeddir[2];
+                GetUnitVec(newvel, speeddir);
                 new Float:drop = landframe[client] ? 0.0 : GetFrictionDrop(client, tmpvel[client]);
                 for (new i = 0; i < 2; i++)
                     newvel[i] = speeddir[i] * (tmpvel[client] - drop);
@@ -292,6 +289,7 @@ public DoStuff(client)
     // }}}
 
     DoMovement(client, newvel, wishdir);
+    ShowSpeedo(client);
 
     if ((touched[client] || !inair[client]) && (newvel[0] != realvel[0] || newvel[1] != realvel[1] || newvel[2] != realvel[2]))
         TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, newvel);
@@ -307,46 +305,21 @@ public DoStuff(client)
 
 DoMovement(client, Float:newvel[3], Float:wishdir[3])
 {
-    new Float:speed = GetAbsVec(newvel);
+    Accelerate(client, newvel, wishdir);
 
-    // TODO: Check if this expression is right and document why
-    if (speed != 0.0 && wishdir[0] != 0.0 && wishdir[1] != 0.0)
-    {
-        if (touched[client])
-            WallAccelerate(client, newvel, speed, wishdir);
-        else
-            Accelerate(client, newvel, speed, wishdir);
+    if (touched[client])
+        DoFriction(client, newvel);
 
-        speed = GetAbsVec(newvel);
-    }
+    // Backup speed to restore it later in case it is over 520
+    tmpvel[client] = GetAbsVec(newvel);
 
-    tmpvel[client] = speed;
-
-    // Speedmeter
-    if (showSpeed[client])
-    {
 #if defined DEBUG
-        debugSpeed = speed;
-        for (new i = 0; i < 3; i++)
-            debugVel[i] = newvel[i];
-        for (new i = 0; i < 2; i++)
-            debugWishdir[i] = wishdir[i];
-
-        PrintCenterText(client, "new: %f\n%f\n%f\nspeeddir: %f;%f\nmaxspeed: %f, %f\noldspeed: %f\nproj: %f\nwishdir: (%f;%f)\nacc: %f\ndrop: %f %f\nangle: %f",
-                debugSpeed, debugVel[0], debugVel[1],
-                debugVelDir[0], debugVelDir[1],
-                realMaxSpeeds[client], GetMaxSpeed(client),
-                debugOldspeed,
-                debugProj,
-                debugWishdir[0], debugWishdir[1],
-                debugAcc,
-                GetFriction(client), debugFrictionDrop,
-                debugAngle
-                );
-#else
-        PrintCenterText(client, "%f", speed);
+    debugSpeed = tmpvel[client];
+    for (new i = 0; i < 3; i++)
+        debugVel[i] = newvel[i];
+    for (new i = 0; i < 2; i++)
+        debugWishdir[i] = wishdir[i];
 #endif
-    }
 }
 
 DoFriction(client, Float:vel[3], bool:interpolate = true)
@@ -355,38 +328,29 @@ DoFriction(client, Float:vel[3], bool:interpolate = true)
         return;
 
     new Float:speed = GetAbsVec(vel);
-    if (speed > realMaxSpeeds[client] + 1)
+
+    // if (speed > realMaxSpeeds[client] + 1)
+    if (speed > 0.001)
     {
         new Float:drop = GetFrictionDrop(client, speed);
         if (interpolate)
             drop -= GetFrictionInterpolation(realMaxSpeeds[client]);
 
+        new Float:scale = (speed - drop) / speed;
+        if (scale < 0.0)
+            scale = 0.0;
+        for (new i = 0; i < 2; i++)
+            vel[i] *= scale;
+
 #if defined DEBUG
         debugFrictionDrop = drop;
 #endif
-        new Float:newspeed = (speed - drop) / speed;
-        if (newspeed > 0.1)
-            for (new i = 0; i < 2; i++)
-                vel[i] = vel[i] * newspeed;
     }
 }
 // }}}
 
 // Helper functions {{{
-// Fills the fwd and right vector with a unit vector pointing in the
-// direction the client is looking and the right of it.
-// fwd and right must be 3D vectors, although their z value is always zero.
-GetViewAngle(client, Float:fwd[3], Float:right[3])
-{
-    GetClientEyeAngles(client, fwd);
-    fwd[0] = Cosine(DegToRad(fwd[1]));
-    fwd[1] = Sine(DegToRad(fwd[1]));
-    fwd[2] = 0.0;
-    right[0] = fwd[1];
-    right[1] = -fwd[0];
-    right[2] = 0.0;
-}
-
+// Movement related {{{
 // Checks for collisions in a given direction using the client's bounding box.
 // If a collision was found, the collding entity's normal is stored in the
 // given normal vector.
@@ -431,15 +395,25 @@ bool:GetWallNormal(client, const Float:wishdir[3], Float:normal[3])
 // Calculates the acceleration between the last and the current frame, adds
 // it together the "Quake way" and stores it in newvel.
 // newvel: The (untouched) velocity vector
-// speed: abs(newvel)
 // wishdir: The acceleration direction (normalized)
-Accelerate(client, Float:newvel[3], Float:speed, const Float:wishdir[3])
+Accelerate(client, Float:newvel[3], const Float:wishdir[3])
 {
-    new Float:maxspeed = realMaxSpeeds[client];
-    new Float:currentspeed = DotProduct(oldvel[client], wishdir);
+    new Float:speed = GetAbsVec(newvel);
 
+    // TODO: Check if this expression is right and document why
+    if (speed == 0.0 || wishdir[0] == 0.0 || wishdir[1] == 0.0)
+        return;
+
+    new Float:maxspeed = realMaxSpeeds[client];
     new Float:oldspeed = GetAbsVec(oldvel[client]);
     new Float:acc = speed - oldspeed;
+
+    // TODO: Check if this needs to be seperated
+    new Float:currentspeed;
+    if (touched[client])
+        currentspeed = DotProduct(newvel, wishdir);
+    else
+        currentspeed = DotProduct(oldvel[client], wishdir);
 
     if (currentspeed + acc > maxspeed)
         acc = maxspeed - currentspeed;
@@ -451,70 +425,19 @@ Accelerate(client, Float:newvel[3], Float:speed, const Float:wishdir[3])
         newvel[i] = speeddir[i] * (oldspeed + acc);
 
 #if defined DEBUG
-    debugVelDir[0] = speeddir[0];
-    debugVelDir[1] = speeddir[1];
-    debugOldspeed = oldspeed;
-    debugProj = currentspeed;
-    debugAcc = acc;
-#endif
-}
-
-WallAccelerate(client, Float:newvel[3], Float:speed, const Float:wishdir[3])
-{
-    new Float:maxspeed = realMaxSpeeds[client];
-    new Float:oldspeed = GetAbsVec(oldvel[client]);
-
-    new Float:acc = speed - oldspeed;
-
-    // New vel was clipped by the engine, so the following works
-    new Float:currentspeed = DotProduct(newvel, wishdir);
-
-    if (currentspeed + acc > maxspeed)
-        acc = maxspeed - currentspeed;
-
-    decl Float:speeddir[2];
-    GetUnitVec(newvel, speeddir);
-
-    for (new i = 0; i < 2; i++)
-        newvel[i] = speeddir[i] * (oldspeed + acc);
-
-    DoFriction(client, newvel);
-
-#if defined DEBUG
-    PrintToServer("---------- WallAccelerate");
-    PrintToServer("oldvel: %f, %f abs: %f", oldvel[client][0], oldvel[client][1], oldspeed);
-    PrintToServer("newvel: %f, %f abs: %f", newvel[0], newvel[1], speed);
-    PrintToServer("wishdir: %f, %f", wishdir[0], wishdir[1]);
-
-    debugVelDir[0] = speeddir[0];
-    debugVelDir[1] = speeddir[1];
-    debugOldspeed = oldspeed;
-    debugProj = currentspeed;
-    debugAcc = acc;
-#endif
-}
-
-// Fills wishdir with a normalized vector pointing in the direction the
-// player wants to move in.
-GetWishdir(client, buttons, Float:wishdir[3])
-{
-    decl Float:fwd[3], Float:right[3];
-    GetViewAngle(client, fwd, right);
-
-    if (buttons & IN_FORWARD || buttons & IN_BACK || buttons & IN_MOVERIGHT || buttons & IN_MOVELEFT)
+    if (touched[client])
     {
-        if (buttons & IN_FORWARD)
-            AddVectors(wishdir, fwd, wishdir);
-        if (buttons & IN_BACK)
-            SubtractVectors(wishdir, fwd, wishdir);
-        if (buttons & IN_MOVERIGHT)
-            AddVectors(wishdir, right, wishdir);
-        if (buttons & IN_MOVELEFT)
-            SubtractVectors(wishdir, right, wishdir);
-
-        wishdir[2] = 0.0;     // we don't care for the z axis
-        NormalizeVector(wishdir, wishdir);
+        PrintToServer("----------");
+        PrintToServer("oldvel: %f, %f abs: %f", oldvel[client][0], oldvel[client][1], oldspeed);
+        PrintToServer("newvel: %f, %f abs: %f", newvel[0], newvel[1], speed);
+        PrintToServer("wishdir: %f, %f", wishdir[0], wishdir[1]);
     }
+    debugVelDir[0] = speeddir[0];
+    debugVelDir[1] = speeddir[1];
+    debugOldspeed = oldspeed;
+    debugProj = currentspeed;
+    debugAcc = acc;
+#endif
 }
 
 // For some reason (I assume because the engine's internal friction handling
@@ -562,9 +485,78 @@ Float:GetFrictionDrop(client, Float:speed)
 #endif
 }
 
-public bool:TR_FilterSelf(ent, mask, any:data)
+// Fills the fwd and right vector with a unit vector pointing in the
+// direction the client is looking and the right of it.
+// fwd and right must be 3D vectors, although their z value is always zero.
+GetViewAngle(client, Float:fwd[3], Float:right[3])
 {
-    return ent != data;
+    GetClientEyeAngles(client, fwd);
+    fwd[0] = Cosine(DegToRad(fwd[1]));
+    fwd[1] = Sine(DegToRad(fwd[1]));
+    fwd[2] = 0.0;
+    right[0] = fwd[1];
+    right[1] = -fwd[0];
+    right[2] = 0.0;
+}
+
+// Fills wishdir with a normalized vector pointing in the direction the
+// player wants to move in.
+GetWishdir(client, buttons, Float:wishdir[3])
+{
+    decl Float:fwd[3], Float:right[3];
+    GetViewAngle(client, fwd, right);
+
+    if (buttons & IN_FORWARD || buttons & IN_BACK || buttons & IN_MOVERIGHT || buttons & IN_MOVELEFT)
+    {
+        if (buttons & IN_FORWARD)
+            AddVectors(wishdir, fwd, wishdir);
+        if (buttons & IN_BACK)
+            SubtractVectors(wishdir, fwd, wishdir);
+        if (buttons & IN_MOVERIGHT)
+            AddVectors(wishdir, right, wishdir);
+        if (buttons & IN_MOVELEFT)
+            SubtractVectors(wishdir, right, wishdir);
+
+        wishdir[2] = 0.0;     // we don't care for the z axis
+        NormalizeVector(wishdir, wishdir);
+    }
+}
+// }}}
+
+// Setup, Variables, Misc, ... {{{
+ShowSpeedo(client)
+{
+    if (showSpeed[client])
+    {
+#if defined DEBUG
+        PrintCenterText(client, "new: %f\n%f\n%f\nspeeddir: %f;%f\nmaxspeed: %f, %f\noldspeed: %f\nproj: %f\nwishdir: (%f;%f)\nacc: %f\ndrop: %f %f\nangle: %f",
+                debugSpeed, debugVel[0], debugVel[1],
+                debugVelDir[0], debugVelDir[1],
+                realMaxSpeeds[client], GetMaxSpeed(client),
+                debugOldspeed,
+                debugProj,
+                debugWishdir[0], debugWishdir[1],
+                debugAcc,
+                GetFriction(client), debugFrictionDrop,
+                debugAngle
+                );
+#else
+        PrintCenterText(client, "%f", speed);
+#endif
+    }
+}
+
+HookClient(client)
+{
+    SDKHook(client, SDKHook_PreThink, OnPreThink);
+    SDKHook(client, SDKHook_PostThink, OnPostThink);
+    SDKHook(client, SDKHook_Touch, OnTouch);
+}
+
+SetupClient(client)
+{
+    autohop[client] = defaultAutohop;
+    showSpeed[client] = defaultSpeedo;
 }
 
 GetVelocity(client, Float:vel[3])
@@ -582,18 +574,11 @@ Float:SetMaxSpeed(client, Float:speed)
     SetEntPropFloat(client, Prop_Data, "m_flMaxspeed", speed);
 }
 
-HookClient(client)
+public bool:TR_FilterSelf(ent, mask, any:data)
 {
-    SDKHook(client, SDKHook_PreThink, OnPreThink);
-    SDKHook(client, SDKHook_PostThink, OnPostThink);
-    SDKHook(client, SDKHook_Touch, OnTouch);
+    return ent != data;
 }
-
-SetupClient(client)
-{
-    autohop[client] = defaultAutohop;
-    showSpeed[client] = defaultSpeedo;
-}
+// }}}
 
 // 2D Vector functions {{{
 Float:GetAngleBetween(const Float:a[], const Float:b[])
