@@ -7,15 +7,15 @@
 #pragma semicolon 1
 
 #define JUMP_SPEED 300.0
-#define FRAMETIME 0.015 // 66.666666
+#define AIR_CAP 30.0
+#define FRAMETIME GetTickInterval()
+// #define FRAMETIME 0.015 // 66.666666
 #define PI 3.14159
 #define MAX_STEP_HEIGHT 18 // https://developer.valvesoftware.com/wiki/Team_Fortress_2_Mapper's_Reference#Other_Info
 #define DEBUG
-#define SKIP_FRICITON
+// #define SKIP_FRICITON
 
-// TODO: backwards speed, doors -.-, autohop duckjump, disable for spectators
-//       version cvar, spy invisibility (fuck -.-),
-//       check if airtime is skippable
+// TODO: autohop duckjump, disable for spectators, version cvar, test speedap
 
 // Variables {{{
 new Handle:cvarEnabled          = INVALID_HANDLE;
@@ -42,7 +42,7 @@ new Float:sv_airaccelerate = 10.0;
 // Player data
 // Arrays are 1 bigger than MAXPLAYERS for the convenience of not having to
 // write client - 1 every time when using a client id as index.
-new Float:oldvel        [MAXPLAYERS + 1][3];
+new Float:customMaxspeed[MAXPLAYERS + 1];
 new Float:realMaxSpeeds [MAXPLAYERS + 1];
 new Float:tmpvel        [MAXPLAYERS + 1];
 new bool:autohop        [MAXPLAYERS + 1];
@@ -50,22 +50,17 @@ new bool:showSpeed      [MAXPLAYERS + 1];
 new bool:inair          [MAXPLAYERS + 1];
 new bool:landframe      [MAXPLAYERS + 1];
 new bool:jumpPressed    [MAXPLAYERS + 1];
-new bool:touched        [MAXPLAYERS + 1];
 // new playerButtons       [MAXPLAYERS + 1];
 
 #if defined DEBUG
 new Float:debugSpeed;
 new Float:debugVel[3];
-new Float:debugVelDir[2];
-new Float:debugOldspeed;
 new Float:debugProj;
 new Float:debugWishdir[2];
 new Float:debugAcc;
 new Float:debugFrictionDrop;
-new Float:debugAngle;
-
-new Handle:cvarFricOffset = INVALID_HANDLE;
-new Float:frictionOffset = 0.0;
+new Float:debugEyeAngle;
+new debugAngle;
 #endif
 
 public Plugin:myinfo = {
@@ -141,13 +136,6 @@ public ChangeAirAccelerate(Handle:convar, const String:oldValue[], const String:
 {
     sv_airaccelerate = GetConVarFloat(convar);
 }
-
-#if defined DEBUG
-public ChangeFrictionOffset(Handle:convar, const String:oldValue[], const String:newValue[])
-{
-    frictionOffset = GetConVarFloat(convar);
-}
-#endif
 // }}}
 
 // Events {{{
@@ -182,12 +170,6 @@ public OnPluginStart()
     HookConVarChange(cvarAccelerate, ChangeAccelerate);
     HookConVarChange(cvarAirAccelerate, ChangeAirAccelerate);
 
-#if defined DEBUG
-    cvarFricOffset = CreateConVar("qm_friction_offset", "0",
-            "Constant subtracted to the friction. Don't use if you don't know what you do.");
-    HookConVarChange(cvarFricOffset, ChangeFrictionOffset);
-#endif
-
     for (new i = 1; i <= MaxClients; i++)
     {
         if (Client_IsValid(i) && IsClientInGame(i))
@@ -204,71 +186,45 @@ public OnClientPutInServer(client)
     SetupClient(client);
 }
 
-public OnTouch(client, other)
-{
-    if (!enabled || !IsClientInGame(client) || !IsPlayerAlive(client))
-        return;
-
-    if (other > 0 && other <= MaxClients)
-        return;
-
-    touched[client] = true;
-}
-
 public OnPreThink(client)
 {
     if (!enabled || !IsClientInGame(client) || !IsPlayerAlive(client))
         return;
-
     DoStuffPre(client);
-
-    // realMaxSpeeds[client] = GetMaxSpeed(client);
-    // SetMaxSpeed(client, 400.0);
-    //
-    // decl Float:vel[3];
-    // GetVelocity(client, vel);
-    // new Float:speed = GetAbsVec(vel);
-    // if (speed > 0.0)
-    // {
-    //     PrintToServer("pre: %f", speed);
-    //
-    //     new Float:drop = GetFrictionDrop(client, speed);
-    //     new Float:acc = GetAcceleration(client, 400.0);
-    //     new Float:newspeed = speed - drop + acc;
-    //
-    //     if (newspeed > 320.0)
-    //     {
-    //         new buttons = GetClientButtons(client);
-    //         decl Float:wishdir[3];
-    //         GetWishdir(client, buttons, wishdir);
-    //         new Float:sub = newspeed - 320.0;
-    //
-    //         vel[0] -= wishdir[0] * sub;
-    //         vel[1] -= wishdir[1] * sub;
-    //         TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, vel);
-    //     }
-    // }
 }
 
 public OnPostThink(client)
 {
     if (!enabled || !IsClientInGame(client) || !IsPlayerAlive(client))
         return;
-
-    // DoStuff(client);
-    decl Float:vel[3];
-    GetVelocity(client, vel);
-    new Float:speed = GetAbsVec(vel);
-    if (speed > 0.0)
-        PrintToServer("post: %f", speed);
-
-    ShowSpeedo(client);
-
-    SetMaxSpeed(client, realMaxSpeeds[client]);
+    DoStuffPost(client);
 }
 // }}}
 
-// Movement functions {{{
+public DoStuffPost(client)
+{
+    // Catch weapon related speed boosts (they don't appear in PreThink)
+    if (GetMaxSpeed(client) != customMaxspeed[client])
+        realMaxSpeeds[client] = GetMaxSpeed(client);
+
+    // Restore speed if above 520
+    if (!inair[client] && tmpvel[client] > 520.0)
+    {
+        decl Float:vel[3];
+        GetVelocity(client, vel);
+        new Float:speed = GetAbsVec(vel);
+        for (new i = 0; i < 2; i++)
+            vel[i] *= tmpvel[client] / speed;
+        DoFriction(client, vel);
+        TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, vel);
+    }
+
+    ShowSpeedo(client);
+
+    // Reset max speed
+    SetMaxSpeed(client, realMaxSpeeds[client]);
+}
+
 public DoStuffPre(client)
 {
     realMaxSpeeds[client] = GetMaxSpeed(client);
@@ -276,67 +232,73 @@ public DoStuffPre(client)
     decl Float:vel[3];
     GetVelocity(client, vel);
     new Float:speed = GetAbsVec(vel);
+    tmpvel[client] = speed;
+
+#if defined DEBUG
+    decl Float:dir[3];
+    GetClientEyeAngles(client, dir);
+    debugEyeAngle = ConvertAngle(dir[1]);
+    debugAngle = RoundFloat(FloatAbs(dir[1])) % 45;
+    if (debugAngle > 30)
+        debugAngle = 45 - debugAngle;
+#endif
 
     new buttons = GetClientButtons(client);
 
     // {{{
-    // CheckGround(client);
-    //
-    // if (!inair[client])
-    // {
-    //     if (landframe[client])
-    //     {
-    //         // Pressing jump while landing?
-    //         if (autohop[client] && buttons & IN_JUMP)
-    //         {
-    //             vel[2] = JUMP_SPEED;
-    //             // TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, vel);
-    //         }
-    //     }
-    //
-    //     // Restore speed if above 520
-    //     // TODO: Check if this friction interferes with the friction
-    //     //       applied when wallstrafing
-    //     // if (tmpvel[client] > 520.0)
-    //     // {
-    //     //     decl Float:speeddir[2];
-    //     //     GetUnitVec(newvel, speeddir);
-    //     //     new Float:drop = landframe[client] ? 0.0 : GetFrictionDrop(client, tmpvel[client]);
-    //     //     for (new i = 0; i < 2; i++)
-    //     //         newvel[i] = speeddir[i] * (tmpvel[client] - drop);
-    //     // }
-    //
-    //     // Jumping while crouching
-    //     if (duckjump && !jumpPressed[client] && buttons & IN_JUMP && buttons & IN_DUCK)
-    //     {
-    //         vel[2] = JUMP_SPEED;
-    //         TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, vel);
-    //     }
-    // }
-    //
-    // // Double negate to prevent tag mismatch warning
-    // jumpPressed[client] = !!(buttons & IN_JUMP);
+    CheckGround(client);
+
+    if (!inair[client])
+    {
+        if (landframe[client])
+        {
+            // Pressing jump while landing?
+            if (autohop[client] && buttons & IN_JUMP)
+            {
+                vel[2] = JUMP_SPEED;
+                TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, vel);
+            }
+        }
+
+        // Jumping while crouching
+        if (duckjump && !jumpPressed[client] && buttons & IN_JUMP && buttons & IN_DUCK)
+        {
+            vel[2] = JUMP_SPEED;
+            TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, vel);
+        }
+    }
+
+    // Double negate to prevent tag mismatch warning
+    jumpPressed[client] = !!(buttons & IN_JUMP);
     // }}}
 
     // Movement prediction {{{
+    // if (inair[client])
+    // {
+    //     // SetMaxSpeed(client, 10000.0); // Breaks cloak and dagger
+    //     return;
+    // }
+
     new Float:maxspeed = realMaxSpeeds[client];
     new Float:drop = GetFrictionDrop(client, speed);
     new Float:acc = GetAcceleration(client, maxspeed);
     new Float:maxnewspeed = speed - drop + acc;
 
     // No need to intervene if the maximum gainable speed is still below maxspeed
-    // if (maxnewspeed <= maxspeed)
-    if (speed + acc <= maxspeed)
+    if (maxnewspeed <= maxspeed)
         return;
 
     decl Float:wishdir[3];
     GetWishdir(client, buttons, wishdir);
 
-    if (speed == 0.0 || wishdir[0] == 0.0 || wishdir[1] == 0.0)
+    if (speed == 0.0) // || wishdir[0] == 0.0 || wishdir[1] == 0.0)
         return;
 
-    DoFriction(client, vel, false);
-    Accelerate(client, vel, wishdir, false);
+    if (wishdir[0] != 0.0 || wishdir[1] != 0.0)
+    {
+        DoFriction(client, vel);
+        Accelerate(client, vel, wishdir, inair[client]);
+    }
 
     speed = GetAbsVec(vel);
 
@@ -344,7 +306,13 @@ public DoStuffPre(client)
         maxspeed = speed;
     else
         maxspeed = speed < speedcap ? speed : speedcap;
-    SetMaxSpeed(client, maxspeed);
+
+    if (FloatAbs(maxspeed - realMaxSpeeds[client]) > 0.1)
+    {
+        customMaxspeed[client] = maxspeed;
+        SetMaxSpeed(client, maxspeed);
+        // PrintToServer("SetMaxSpeed: %f", maxspeed);
+    }
 
 #if defined DEBUG
     debugSpeed = speed;
@@ -356,129 +324,16 @@ public DoStuffPre(client)
     // }}}
 }
 
-// old {{{
-public DoStuff(client)
-{
-    // Catch weapon related speed boosts (they don't appear in PreThink)
-    if (GetMaxSpeed(client) != 100000.0)
-        realMaxSpeeds[client] = GetMaxSpeed(client);
-
-    decl Float:newvel[3], Float:realvel[3];
-    GetVelocity(client, newvel);
-    GetVelocity(client, realvel);
-
-    new buttons = GetClientButtons(client);
-
-    decl Float:wishdir[3];
-    GetWishdir(client, buttons, wishdir);
-
-    // Check if colliding with a wall
-    if (touched[client])
-    {
-        decl Float:normal[3];
-        touched[client] = GetWallNormal(client, wishdir, normal);
-
-#if defined DEBUG
-        if (touched[client])
-        {
-            decl Float:wallvec[2];
-            wallvec[0] = normal[1];
-            wallvec[1] = -normal[0];
-            debugAngle = GetAngleBetween(wishdir, wallvec);
-            PrintToServer("wallvec: %f, %f", wallvec[0], wallvec[1]);
-        }
-#endif
-    }
-
-    // collision ground {{{
-    {
-        if (GetEntPropEnt(client, Prop_Send, "m_hGroundEntity") == -1)
-        {
-            inair[client] = true;
-        }
-        else
-        {
-            landframe[client] = false;
-            if (inair[client])
-            {
-                // Pressing jump while landing?
-                if (autohop[client] && buttons & IN_JUMP)
-                    newvel[2] = JUMP_SPEED;
-                inair[client] = false;
-                landframe[client] = true;
-            }
-
-            // Restore speed if above 520
-            // TODO: Check if this friction interferes with the friction
-            //       applied when wallstrafing
-            if (tmpvel[client] > 520.0)
-            {
-                decl Float:speeddir[2];
-                GetUnitVec(newvel, speeddir);
-                new Float:drop = landframe[client] ? 0.0 : GetFrictionDrop(client, tmpvel[client]);
-                for (new i = 0; i < 2; i++)
-                    newvel[i] = speeddir[i] * (tmpvel[client] - drop);
-            }
-
-            // Jumping while crouching
-            if (duckjump && !jumpPressed[client] && buttons & IN_JUMP && buttons & IN_DUCK)
-                newvel[2] = JUMP_SPEED;
-        }
-
-        // Double negate to prevent tag mismatch warning
-        jumpPressed[client] = !!(buttons & IN_JUMP);
-    }
-    // }}}
-
-    DoMovement(client, newvel, wishdir);
-    ShowSpeedo(client);
-
-    if ((touched[client] || !inair[client]) && (newvel[0] != realvel[0] || newvel[1] != realvel[1] || newvel[2] != realvel[2]))
-        TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, newvel);
-
-    for (new i = 0; i < 3; i++)
-        oldvel[client][i] = newvel[i];
-
-    touched[client] = false;
-
-    // Reset max speed
-    SetMaxSpeed(client, realMaxSpeeds[client]);
-}
-
-DoMovement(client, Float:newvel[3], Float:wishdir[3])
-{
-    // Accelerate(client, newvel, wishdir);
-
-    if (touched[client])
-        DoFriction(client, newvel);
-
-    // Backup speed to restore it later in case it is over 520
-    tmpvel[client] = GetAbsVec(newvel);
-
-#if defined DEBUG
-    debugSpeed = tmpvel[client];
-    for (new i = 0; i < 3; i++)
-        debugVel[i] = newvel[i];
-    for (new i = 0; i < 2; i++)
-        debugWishdir[i] = wishdir[i];
-#endif
-}
-// }}}
-
-DoFriction(client, Float:vel[3], bool:interpolate = true)
+DoFriction(client, Float:vel[3])
 {
     if (inair[client] || landframe[client])
         return;
 
     new Float:speed = GetAbsVec(vel);
 
-    // if (speed > realMaxSpeeds[client] + 1)
     if (speed > 0.001)
     {
         new Float:drop = GetFrictionDrop(client, speed);
-        if (interpolate)
-            drop -= GetFrictionInterpolation(realMaxSpeeds[client]);
-
         new Float:scale = (speed - drop) / speed;
         if (scale < 0.0)
             scale = 0.0;
@@ -490,49 +345,30 @@ DoFriction(client, Float:vel[3], bool:interpolate = true)
 #endif
     }
 }
-// }}}
 
-// Helper functions {{{
-// Movement related {{{
-// Checks for collisions in a given direction using the client's bounding box.
-// If a collision was found, the collding entity's normal is stored in the
-// given normal vector.
-// Additionally, it will check if the colliding object is actually a wall.
-// If yes, it will return true, otherwise false.
-bool:GetWallNormal(client, const Float:wishdir[3], Float:normal[3])
+ShowSpeedo(client)
 {
-    decl Float:origin[3], Float:mins[3], Float:maxs[3];
-    GetEntPropVector(client, Prop_Data, "m_vecOrigin", origin);
-    GetEntPropVector(client, Prop_Data, "m_vecMins", mins);
-    GetEntPropVector(client, Prop_Data, "m_vecMaxs", maxs);
-    origin[2] += MAX_STEP_HEIGHT + 1;
-    maxs[2] -= MAX_STEP_HEIGHT + 1;
-
-    new Float:dest[3];
-    AddVectors(dest, wishdir, dest);
-    ScaleVector(dest, 10.0);
-    AddVectors(origin, dest, dest);
-
-    // "Trace on" - Shirou
-    new Handle:trace = TR_TraceHullFilterEx(origin, dest, mins, maxs,
-            MASK_SHOT, TR_FilterSelf, client);
-
-    if (TR_DidHit(trace))
+    if (showSpeed[client])
     {
-        TR_GetPlaneNormal(trace, normal);
-
-        // If the z part is not 0, it's not a wall.
-        // The second check is necessary because automatic doors sometimes
-        // have a null normal apparently.
-        if (normal[2] == 0.0 && (normal[0] != 0.0 || normal[1] != 0.0))
-        {
-            CloseHandle(trace);
-            return true;
-        }
+        decl Float:vel[3];
+        GetVelocity(client, vel);
+        new Float:abs = GetAbsVec(vel);
+#if defined DEBUG
+        PrintCenterText(client, "realvel: %f\n%f;%f\npredicted: %f\n%f\n%f\nmaxspeed: %f, %f\nproj: %f\nwishdir: (%f;%f)\nacc: %f\ndrop: %f %f\neyeangle: %f\nangle: %i",
+                abs, vel[0], vel[1],
+                debugSpeed, debugVel[0], debugVel[1],
+                realMaxSpeeds[client], GetMaxSpeed(client),
+                debugProj,
+                debugWishdir[0], debugWishdir[1],
+                debugAcc,
+                GetFriction(client), debugFrictionDrop,
+                debugEyeAngle,
+                debugAngle
+                );
+#else
+        PrintCenterText(client, "%f", abs);
+#endif
     }
-
-    CloseHandle(trace);
-    return false;
 }
 
 // Calculates the acceleration between the last and the current frame, adds
@@ -542,13 +378,17 @@ bool:GetWallNormal(client, const Float:wishdir[3], Float:normal[3])
 Accelerate(client, Float:vel[3], const Float:wishdir[3], bool:air)
 {
     new Float:maxspeed = realMaxSpeeds[client];
+
+    if (air && maxspeed > AIR_CAP)
+        maxspeed = AIR_CAP;
+
     new Float:currentspeed = DotProduct(vel, wishdir);
     new Float:addspeed = maxspeed - currentspeed;
 
     if (addspeed < 0)
         return;
 
-    new Float:acc = GetAcceleration(client, maxspeed, air);
+    new Float:acc = GetAcceleration(client, realMaxSpeeds[client], air);
 
     if (acc > addspeed)
         acc = addspeed;
@@ -557,73 +397,9 @@ Accelerate(client, Float:vel[3], const Float:wishdir[3], bool:air)
         vel[i] += wishdir[i] * acc;
 
 #if defined DEBUG
-    // if (touched[client])
-    // {
-    //     PrintToServer("----------");
-    //     PrintToServer("oldvel: %f, %f abs: %f", oldvel[client][0], oldvel[client][1], oldspeed);
-    //     PrintToServer("newvel: %f, %f abs: %f", newvel[0], newvel[1], speed);
-    //     PrintToServer("wishdir: %f, %f", wishdir[0], wishdir[1]);
-    // }
-    // // debugVelDir[0] = speeddir[0];
-    // debugVelDir[1] = speeddir[1];
-    // debugOldspeed = oldspeed;
     debugProj = currentspeed;
     debugAcc = acc;
 #endif
-}
-
-// For some reason (I assume because the engine's internal friction handling
-// messes it up), wallstrafing behaves strange, meaning the maximum
-// wallstrafe speed is higher or lower as it should be, or the angle to the
-// wall, where the maximum is achived is not about 7-8°.
-// It can be fixed by subtracting a certain value from the friction that
-// this plugin applies (-> WallstrafeAccelerate and DoFriction()).
-// For small speeds (< 280) the optimum angle is still about 3° off, but the
-// maximum achievable speed is correct.
-// Some maxspeeds are still a bit off, e.g. Spy (320 speed) should have a
-// wallstrafe maxspeed of 489 but instead it goes up to 491.
-// This is because I use the linear function below to calculate the offset,
-// rather than hardcoding the measured values that would fit "perfectly".
-// Although the perfectionist in me is screaming that I should fix it,
-// it's good enough for now.
-Float:GetFrictionInterpolation(Float:maxspeed)
-{
-    // Measured values:
-    // 320.0: 13.2
-    // 300.0: 10.3
-    // 280.0:  7.3
-    // 240.0:  1.5 // ~56°
-    // 230.0:  0.3 // ~56°
-
-    return (6.0 / 40.0) * (maxspeed - 230.0) + 0.3;
-}
-
-Float:GetFriction(client)
-{
-    // Not sure if this will ever be different than 1.0, but let's use this
-    // anyway just to be sure.
-#if defined SKIP_FRICITON
-    return 1.0;
-#else
-    return GetEntPropFloat(client, Prop_Data, "m_flFriction");
-#endif
-}
-
-// Caluclate the friction to subtract for a certain speed.
-Float:GetFrictionDrop(client, Float:speed)
-{
-    new Float:friction = sv_friction * GetFriction(client);
-    new Float:control = (speed < sv_stopspeed) ? sv_stopspeed : speed;
-#if defined DEBUG
-    return (control * friction * FRAMETIME) - frictionOffset;
-#else
-    return (control * friction * FRAMETIME);
-#endif
-}
-
-Float:GetAcceleration(client, Float:maxspeed, bool:air = false)
-{
-    return (air ? sv_airaccelerate : sv_accelerate) * FRAMETIME * maxspeed * GetFriction(client);
 }
 
 CheckGround(client)
@@ -641,6 +417,26 @@ CheckGround(client)
             landframe[client] = true;
         }
     }
+}
+
+// Helper functions {{{
+
+// Caluclate the friction to subtract for a certain speed.
+Float:GetFrictionDrop(client, Float:speed)
+{
+    new Float:friction = sv_friction * GetFriction(client);
+    new Float:control = (speed < sv_stopspeed) ? sv_stopspeed : speed;
+    return (control * friction * FRAMETIME);
+}
+
+Float:GetAcceleration(client, Float:maxspeed, bool:air = false)
+{
+    return (air ? sv_airaccelerate : sv_accelerate) * FRAMETIME * maxspeed * GetFriction(client);
+}
+
+Float:ConvertAngle(Float:angle)
+{
+    return angle < 0.0 ? 360.0 + angle : angle;
 }
 
 // Fills the fwd and right vector with a unit vector pointing in the
@@ -680,49 +476,12 @@ GetWishdir(client, buttons, Float:wishdir[3])
         NormalizeVector(wishdir, wishdir);
     }
 }
-// }}}
 
 // Setup, Variables, Misc, ... {{{
-ShowSpeedo(client)
-{
-    if (showSpeed[client])
-    {
-        decl Float:vel[3];
-        GetVelocity(client, vel);
-        new Float:abs = GetAbsVec(vel);
-#if defined DEBUG
-        PrintCenterText(client, "new: %f\n%f\n%f\nrealvel: %f\n%f;%f\nmaxspeed: %f, %f\nproj: %f\nwishdir: (%f;%f)\nacc: %f\ndrop: %f %f\nangle: %f",
-                debugSpeed, debugVel[0], debugVel[1],
-                abs, vel[0], vel[1],
-                realMaxSpeeds[client], GetMaxSpeed(client),
-                debugProj,
-                debugWishdir[0], debugWishdir[1],
-                debugAcc,
-                GetFriction(client), debugFrictionDrop,
-                debugAngle
-                );
-        // PrintCenterText(client, "new: %f\n%f\n%f\nspeeddir: %f;%f\nmaxspeed: %f, %f\noldspeed: %f\nproj: %f\nwishdir: (%f;%f)\nacc: %f\ndrop: %f %f\nangle: %f",
-        //         debugSpeed, debugVel[0], debugVel[1],
-        //         debugVelDir[0], debugVelDir[1],
-        //         realMaxSpeeds[client], GetMaxSpeed(client),
-        //         debugOldspeed,
-        //         debugProj,
-        //         debugWishdir[0], debugWishdir[1],
-        //         debugAcc,
-        //         GetFriction(client), debugFrictionDrop,
-        //         debugAngle
-        //         );
-#else
-        PrintCenterText(client, "%f", abs);
-#endif
-    }
-}
-
 HookClient(client)
 {
     SDKHook(client, SDKHook_PreThink, OnPreThink);
     SDKHook(client, SDKHook_PostThink, OnPostThink);
-    SDKHook(client, SDKHook_Touch, OnTouch);
 }
 
 SetupClient(client)
@@ -734,6 +493,16 @@ SetupClient(client)
 GetVelocity(client, Float:vel[3])
 {
     GetEntPropVector(client, Prop_Data, "m_vecVelocity", vel);
+}
+
+Float:GetFriction(client)
+{
+    // Not sure if this will ever be different than 1.0
+#if defined SKIP_FRICITON
+    return 1.0;
+#else
+    return GetEntPropFloat(client, Prop_Data, "m_flFriction");
+#endif
 }
 
 Float:GetMaxSpeed(client)
