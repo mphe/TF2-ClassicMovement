@@ -1,21 +1,21 @@
 #include <sourcemod>
 #include <sdktools>
 #include <sdkhooks>
-#include <smlib>
-#include <tf2_stocks>
 
 #pragma semicolon 1
 
+// Taken from "Fysics Control" plugin, it seems right.
 #define JUMP_SPEED 300.0
+
+// https://github.com/ValveSoftware/source-sdk-2013/blob/master/mp/src/game/shared/gamemovement.h#L104
 #define AIR_CAP 30.0
-#define FRAMETIME GetTickInterval()
-// #define FRAMETIME 0.015 // 66.666666
+
 #define PI 3.14159
-#define MAX_STEP_HEIGHT 18 // https://developer.valvesoftware.com/wiki/Team_Fortress_2_Mapper's_Reference#Other_Info
+
 #define DEBUG
 // #define SKIP_FRICITON
 
-// TODO: autohop duckjump, disable for spectators, version cvar, test speedap
+// TODO: version cvar, test speedap
 
 // Variables {{{
 new Handle:cvarEnabled          = INVALID_HANDLE;
@@ -50,7 +50,6 @@ new bool:showSpeed      [MAXPLAYERS + 1];
 new bool:inair          [MAXPLAYERS + 1];
 new bool:landframe      [MAXPLAYERS + 1];
 new bool:jumpPressed    [MAXPLAYERS + 1];
-// new playerButtons       [MAXPLAYERS + 1];
 
 #if defined DEBUG
 new Float:debugSpeed;
@@ -72,6 +71,7 @@ public Plugin:myinfo = {
 };
 // }}}
 
+
 // Commands {{{
 public Action:toggleAutohop(client, args)
 {
@@ -90,6 +90,7 @@ public Action:toggleSpeedo(client, args)
     return Plugin_Handled;
 }
 // }}}
+
 
 // Convar changed hooks {{{
 public ChangeEnabled(Handle:convar, const String:oldValue[], const String:newValue[])
@@ -138,11 +139,12 @@ public ChangeAirAccelerate(Handle:convar, const String:oldValue[], const String:
 }
 // }}}
 
+
 // Events {{{
 public OnPluginStart()
 {
     RegConsoleCmd("sm_speed", toggleSpeedo, "Toggle speedometer on/off");
-    RegConsoleCmd("sm_togglehop", toggleAutohop, "Toggle autohopping on/off");
+    RegConsoleCmd("sm_autohop", toggleAutohop, "Toggle autohopping on/off");
 
     cvarEnabled  = CreateConVar("qm_enabled",     "1", "Enable/Disable Quake movement.");
     cvarAutohop  = CreateConVar("qm_autohop",     "1", "Automatically jump while holding jump.");
@@ -171,18 +173,12 @@ public OnPluginStart()
     HookConVarChange(cvarAirAccelerate, ChangeAirAccelerate);
 
     for (new i = 1; i <= MaxClients; i++)
-    {
-        if (Client_IsValid(i) && IsClientInGame(i))
-        {
+        if (IsClientConnected(i))
             SetupClient(i);
-            HookClient(i);
-        }
-    }
 }
 
 public OnClientPutInServer(client)
 {
-    HookClient(client);
     SetupClient(client);
 }
 
@@ -201,6 +197,8 @@ public OnPostThink(client)
 }
 // }}}
 
+
+// Main {{{
 public DoStuffPost(client)
 {
     // Catch weapon related speed boosts (they don't appear in PreThink)
@@ -229,10 +227,13 @@ public DoStuffPre(client)
 {
     realMaxSpeeds[client] = GetMaxSpeed(client);
 
+    new buttons = GetClientButtons(client);
     decl Float:vel[3];
     GetVelocity(client, vel);
-    new Float:speed = GetAbsVec(vel);
-    tmpvel[client] = speed;
+
+    CheckGround(client);
+    HandleJumping(client, buttons, vel);
+    DoMovement(client, vel, buttons);
 
 #if defined DEBUG
     decl Float:dir[3];
@@ -242,12 +243,67 @@ public DoStuffPre(client)
     if (debugAngle > 30)
         debugAngle = 45 - debugAngle;
 #endif
+}
 
-    new buttons = GetClientButtons(client);
+DoMovement(client, Float:vel[3], buttons)
+{
+    new Float:speed = GetAbsVec(vel);
+    tmpvel[client] = speed;
 
-    // {{{
-    CheckGround(client);
+    if (speed == 0.0)
+        return;
 
+    // if (inair[client])
+    // {
+    //     // SetMaxSpeed(client, 10000.0); // Breaks cloak and dagger
+    //     return;
+    // }
+
+    new Float:maxspeed = realMaxSpeeds[client];
+    new Float:drop = GetFrictionDrop(client, speed);
+    new Float:acc = GetAcceleration(client, maxspeed);
+
+    // No need to intervene if the maximum gainable speed is still below maxspeed
+    if (speed - drop + acc <= maxspeed)
+        return;
+
+    decl Float:wishdir[3];
+    GetWishdir(client, buttons, wishdir);
+
+    if (wishdir[0] != 0.0 || wishdir[1] != 0.0)
+    {
+        DoFriction(client, vel);
+        Accelerate(client, vel, wishdir, inair[client]);
+    }
+
+    speed = GetAbsVec(vel);
+
+    // Reuse maxspeed to store the new maxspeed
+    if (speedcap < 0.0)
+        maxspeed = speed;
+    else
+        maxspeed = speed < speedcap ? speed : speedcap;
+
+    // Set calculated speed as new maxspeed to limit the engine in its
+    // acceleration, but also to prevent capping.
+    if (FloatAbs(maxspeed - realMaxSpeeds[client]) > 0.1)
+    {
+        customMaxspeed[client] = maxspeed;
+        SetMaxSpeed(client, maxspeed);
+        // PrintToServer("SetMaxSpeed: %f", maxspeed);
+    }
+
+#if defined DEBUG
+    debugSpeed = speed;
+    for (new i = 0; i < 3; i++)
+        debugVel[i] = vel[i];
+    for (new i = 0; i < 2; i++)
+        debugWishdir[i] = wishdir[i];
+#endif
+}
+
+HandleJumping(client, buttons, Float:vel[3])
+{
     if (!inair[client])
     {
         if (landframe[client])
@@ -270,58 +326,6 @@ public DoStuffPre(client)
 
     // Double negate to prevent tag mismatch warning
     jumpPressed[client] = !!(buttons & IN_JUMP);
-    // }}}
-
-    // Movement prediction {{{
-    // if (inair[client])
-    // {
-    //     // SetMaxSpeed(client, 10000.0); // Breaks cloak and dagger
-    //     return;
-    // }
-
-    new Float:maxspeed = realMaxSpeeds[client];
-    new Float:drop = GetFrictionDrop(client, speed);
-    new Float:acc = GetAcceleration(client, maxspeed);
-    new Float:maxnewspeed = speed - drop + acc;
-
-    // No need to intervene if the maximum gainable speed is still below maxspeed
-    if (maxnewspeed <= maxspeed)
-        return;
-
-    decl Float:wishdir[3];
-    GetWishdir(client, buttons, wishdir);
-
-    if (speed == 0.0) // || wishdir[0] == 0.0 || wishdir[1] == 0.0)
-        return;
-
-    if (wishdir[0] != 0.0 || wishdir[1] != 0.0)
-    {
-        DoFriction(client, vel);
-        Accelerate(client, vel, wishdir, inair[client]);
-    }
-
-    speed = GetAbsVec(vel);
-
-    if (speedcap < 0.0)
-        maxspeed = speed;
-    else
-        maxspeed = speed < speedcap ? speed : speedcap;
-
-    if (FloatAbs(maxspeed - realMaxSpeeds[client]) > 0.1)
-    {
-        customMaxspeed[client] = maxspeed;
-        SetMaxSpeed(client, maxspeed);
-        // PrintToServer("SetMaxSpeed: %f", maxspeed);
-    }
-
-#if defined DEBUG
-    debugSpeed = speed;
-    for (new i = 0; i < 3; i++)
-        debugVel[i] = vel[i];
-    for (new i = 0; i < 2; i++)
-        debugWishdir[i] = wishdir[i];
-#endif
-    // }}}
 }
 
 DoFriction(client, Float:vel[3])
@@ -354,7 +358,7 @@ ShowSpeedo(client)
         GetVelocity(client, vel);
         new Float:abs = GetAbsVec(vel);
 #if defined DEBUG
-        PrintCenterText(client, "realvel: %f\n%f;%f\npredicted: %f\n%f\n%f\nmaxspeed: %f, %f\nproj: %f\nwishdir: (%f;%f)\nacc: %f\ndrop: %f %f\neyeangle: %f\nangle: %i",
+        PrintCenterText(client, "realvel: %f\n%f\n%f\npredicted: %f\n%f\n%f\nmaxspeed: %f, %f\nproj: %f\nwishdir: (%f;%f)\nacc: %f\ndrop: %f %f\neyeangle: %f\nangle: %i",
                 abs, vel[0], vel[1],
                 debugSpeed, debugVel[0], debugVel[1],
                 realMaxSpeeds[client], GetMaxSpeed(client),
@@ -371,10 +375,8 @@ ShowSpeedo(client)
     }
 }
 
-// Calculates the acceleration between the last and the current frame, adds
-// it together the "Quake way" and stores it in newvel.
-// newvel: The (untouched) velocity vector
-// wishdir: The acceleration direction (normalized)
+// Basically the same accelerate code as in the Quake/GoldSrc/Source engine.
+// https://github.com/ValveSoftware/source-sdk-2013/blob/56accfdb9c4abd32ae1dc26b2e4cc87898cf4dc1/sp/src/game/shared/gamemovement.cpp#L1822
 Accelerate(client, Float:vel[3], const Float:wishdir[3], bool:air)
 {
     new Float:maxspeed = realMaxSpeeds[client];
@@ -418,28 +420,33 @@ CheckGround(client)
         }
     }
 }
+// }}}
+
 
 // Helper functions {{{
 
-// Caluclate the friction to subtract for a certain speed.
+// Calculate the friction to subtract for a certain speed.
 Float:GetFrictionDrop(client, Float:speed)
 {
     new Float:friction = sv_friction * GetFriction(client);
     new Float:control = (speed < sv_stopspeed) ? sv_stopspeed : speed;
-    return (control * friction * FRAMETIME);
+    return (control * friction * GetTickInterval());
 }
 
+
+// Calculate the acceleration based on a given maxspeed.
 Float:GetAcceleration(client, Float:maxspeed, bool:air = false)
 {
-    return (air ? sv_airaccelerate : sv_accelerate) * FRAMETIME * maxspeed * GetFriction(client);
+    return (air ? sv_airaccelerate : sv_accelerate) * GetTickInterval() * maxspeed * GetFriction(client);
 }
 
+// Convert the 0-180, 0-(-180) angles (as in GetClientEyeAngles) to 0-360.
 Float:ConvertAngle(Float:angle)
 {
     return angle < 0.0 ? 360.0 + angle : angle;
 }
 
-// Fills the fwd and right vector with a unit vector pointing in the
+// Fills the fwd and right vector with a normalized vector pointing in the
 // direction the client is looking and the right of it.
 // fwd and right must be 3D vectors, although their z value is always zero.
 GetViewAngle(client, Float:fwd[3], Float:right[3])
@@ -478,16 +485,12 @@ GetWishdir(client, buttons, Float:wishdir[3])
 }
 
 // Setup, Variables, Misc, ... {{{
-HookClient(client)
-{
-    SDKHook(client, SDKHook_PreThink, OnPreThink);
-    SDKHook(client, SDKHook_PostThink, OnPostThink);
-}
-
 SetupClient(client)
 {
     autohop[client] = defaultAutohop;
     showSpeed[client] = defaultSpeedo;
+    SDKHook(client, SDKHook_PreThink, OnPreThink);
+    SDKHook(client, SDKHook_PostThink, OnPostThink);
 }
 
 GetVelocity(client, Float:vel[3])
@@ -514,30 +517,12 @@ Float:SetMaxSpeed(client, Float:speed)
 {
     SetEntPropFloat(client, Prop_Data, "m_flMaxspeed", speed);
 }
-
-public bool:TR_FilterSelf(ent, mask, any:data)
-{
-    return ent != data;
-}
 // }}}
 
 // 2D Vector functions {{{
-Float:GetAngleBetween(const Float:a[], const Float:b[])
-{
-    return ArcCosine(DotProduct(a, b) / (GetAbsVec(a) * GetAbsVec(b))) * 180 / PI;
-}
-
 Float:DotProduct(const Float:a[], const Float:b[])
 {
     return a[0] * b[0] + a[1] * b[1];
-}
-
-// Calculates the unit vector for a and stores it in b.
-GetUnitVec(const Float:a[], Float:b[])
-{
-    new Float:len = GetAbsVec(a);
-    for (new i = 0; i < 2; i++)
-        b[i] = a[i] / len;
 }
 
 Float:GetAbsVec(const Float:a[])
