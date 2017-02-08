@@ -10,7 +10,7 @@
 // https://github.com/ValveSoftware/source-sdk-2013/blob/master/mp/src/game/shared/gamemovement.h#L104
 #define AIR_CAP 30.0
 
-// #define DEBUG
+#define DEBUG
 
 // TODO: version cvar, test speedcap, cookies,
 //       ignore fake clients, use GetEntityFlags to check for ground and water
@@ -83,19 +83,48 @@ public Plugin:myinfo = {
 // Commands {{{
 public Action:toggleAutohop(client, args)
 {
-    autohop[client] = !autohop[client];
-    if (autohop[client])
-        ReplyToCommand(client, "[QM] Autohopping enabled");
-    else
-        ReplyToCommand(client, "[QM] Autohopping disabled");
+    if (HandleBoolCommand(client, args, "sm_autohop", autohop))
+    {
+        if (autohop[client])
+            ReplyToCommand(client, "[QM] Autohopping enabled");
+        else
+            ReplyToCommand(client, "[QM] Autohopping disabled");
+    }
+
     return Plugin_Handled;
 }
 
 public Action:toggleSpeedo(client, args)
 {
-    showSpeed[client] = !showSpeed[client];
-    PrintCenterText(client, "");
+    if (HandleBoolCommand(client, args, "sm_speed", showSpeed))
+        PrintCenterText(client, "");
     return Plugin_Handled;
+}
+
+bool:HandleBoolCommand(client, args, const String:cmd[], bool:variable[])
+{
+    if (args == 0)
+        variable[client] = !variable[client];
+    else
+    {
+        new String:buf[5];
+        GetCmdArg(1, buf, sizeof(buf));
+
+        if (strcmp(buf, "on", false) == 0)
+            variable[client] = true;
+        else if (strcmp(buf, "off", false) == 0)
+            variable[client] = false;
+        else
+        {
+            decl String:reply[100] = "[QM] Syntax: ";
+            StrCat(reply, sizeof(reply), cmd);
+            StrCat(reply, sizeof(reply),  " [on|off]");
+            ReplyToCommand(client, reply);
+            return false;
+        }
+    }
+
+    return true;
 }
 // }}}
 
