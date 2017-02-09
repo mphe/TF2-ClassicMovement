@@ -12,8 +12,7 @@
 
 #define DEBUG
 
-// TODO: version cvar, test speedcap, cookies,
-//       ignore fake clients, use GetEntityFlags to check for ground and water
+// TODO: version cvar, test speedcap, use GetEntityFlags to check for ground and water
 
 // Variables {{{
 // Plugin cvars
@@ -222,8 +221,7 @@ public OnPluginStart()
     HookConVarChange(cvarFrametime, ChangeFrametime);
 
     for (new i = 1; i <= MaxClients; i++)
-        if (IsClientConnected(i))
-            SetupClient(i);
+        SetupClient(i);
 }
 
 public OnClientPutInServer(client)
@@ -592,6 +590,9 @@ GetWishdir(client, buttons, Float:wishdir[3])
 // Setup, Variables, Misc, ... {{{
 SetupClient(client)
 {
+    if (!IsClientConnected(client) || IsFakeClient(client) || client < 1 || client > MAXPLAYERS)
+        return;
+
     autohop[client] = defaultAutohop;
     showSpeed[client] = defaultSpeedo;
     oldbuttons[client] = 0;
