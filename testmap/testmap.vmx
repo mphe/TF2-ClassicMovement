@@ -2,7 +2,7 @@ versioninfo
 {
 	"editorversion" "400"
 	"editorbuild" "7293"
-	"mapversion" "13"
+	"mapversion" "15"
 	"formatversion" "100"
 	"prefab" "0"
 }
@@ -20,12 +20,12 @@ viewsettings
 world
 {
 	"id" "1"
-	"mapversion" "13"
+	"mapversion" "15"
 	"classname" "worldspawn"
-	"skyname" "sky_tf2_04"
-	"maxpropscreenwidth" "-1"
-	"detailvbsp" "detail_2fort.vbsp"
 	"detailmaterial" "detail/detailsprites_2fort"
+	"detailvbsp" "detail_2fort.vbsp"
+	"maxpropscreenwidth" "-1"
+	"skyname" "sky_tf2_04"
 	solid
 	{
 		"id" "2"
@@ -503,7 +503,7 @@ entity
 	"classname" "info_teleport_destination"
 	"angles" "0 90 0"
 	"targetname" "dest"
-	"origin" "493 -463 63"
+	"origin" "241 -461 69"
 	editor
 	{
 		"color" "220 30 220"
