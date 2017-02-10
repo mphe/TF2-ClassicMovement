@@ -12,8 +12,9 @@
 
 #define DEBUG
 
-// TODO: version cvar, remove jumpPressed -> obsolete,
+// TODO: version cvar,
 //       use GetEntityFlags to check for ground and water,
+//       allow/disable autohop globally
 
 // Variables {{{
 // Plugin cvars
@@ -55,7 +56,6 @@ new bool:autohop        [MAXPLAYERS + 1];
 new bool:showSpeed      [MAXPLAYERS + 1];
 new bool:inair          [MAXPLAYERS + 1];
 new bool:landframe      [MAXPLAYERS + 1];
-new bool:jumpPressed    [MAXPLAYERS + 1];
 new oldbuttons          [MAXPLAYERS + 1];
 
 #if defined DEBUG
@@ -302,6 +302,8 @@ public DoStuffPre(client)
     if (!inair[client])
         DoMovement(client, vel, wishdir, true);
 
+    oldbuttons[client] = buttons;
+
 #if defined DEBUG
     for (new i = 0; i < 2; i++)
         debugWishdir[i] = wishdir[i];
@@ -417,33 +419,20 @@ DoInterpolation(client, buttons, Float:wishdir[3], Float:vel[3])
         }
     }
     oldangle[client] = angle;
-    oldbuttons[client] = buttons;
 }
 
 HandleJumping(client, buttons, Float:vel[3])
 {
-    if (!inair[client])
+    if (!inair[client] && buttons & IN_JUMP)
     {
-        if (landframe[client])
-        {
-            // Pressing jump while landing?
-            if (autohop[client] && buttons & IN_JUMP)
-            {
-                vel[2] = JUMP_SPEED;
-                TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, vel);
-            }
-        }
-
-        // Jumping while crouching
-        if (duckjump && !jumpPressed[client] && buttons & IN_JUMP && buttons & IN_DUCK)
+        // Jumping while crouching or pressing jump while landing?
+        if ((duckjump && !(oldbuttons[client] & IN_JUMP) && buttons & IN_DUCK)
+                || (autohop[client] && landframe[client]))
         {
             vel[2] = JUMP_SPEED;
             TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, vel);
         }
     }
-
-    // Double negate to prevent tag mismatch warning
-    jumpPressed[client] = !!(buttons & IN_JUMP);
 }
 
 DoFriction(client, Float:vel[3])
