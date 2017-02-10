@@ -4,24 +4,25 @@
 
 #pragma semicolon 1
 
-// Taken from "Fysics Control" plugin, it seems right.
-#define JUMP_SPEED 300.0
+// Source: Measuring
+#define JUMP_SPEED 283.0
 
 // https://github.com/ValveSoftware/source-sdk-2013/blob/master/mp/src/game/shared/gamemovement.h#L104
 #define AIR_CAP 30.0
 
 #define DEBUG
 
-// TODO: version cvar, test speedcap, use GetEntityFlags to check for ground and water
+// TODO: version cvar, remove jumpPressed -> obsolete,
+//       use GetEntityFlags to check for ground and water,
 
 // Variables {{{
 // Plugin cvars
-new Handle:cvarEnabled          = INVALID_HANDLE;
-new Handle:cvarAutohop          = INVALID_HANDLE;
-new Handle:cvarSpeedo           = INVALID_HANDLE;
-new Handle:cvarMaxspeed         = INVALID_HANDLE;
-new Handle:cvarDuckJump         = INVALID_HANDLE;
-new Handle:cvarFrametime        = INVALID_HANDLE;
+new Handle:cvarEnabled      = INVALID_HANDLE;
+new Handle:cvarAutohop      = INVALID_HANDLE;
+new Handle:cvarSpeedo       = INVALID_HANDLE;
+new Handle:cvarMaxspeed     = INVALID_HANDLE;
+new Handle:cvarDuckJump     = INVALID_HANDLE;
+new Handle:cvarFrametime    = INVALID_HANDLE;
 
 // Engine cvars
 new Handle:cvarFriction         = INVALID_HANDLE;
@@ -30,17 +31,17 @@ new Handle:cvarAccelerate       = INVALID_HANDLE;
 new Handle:cvarAirAccelerate    = INVALID_HANDLE;
 
 // Global settings
-new Float:speedcap = -1.0;
-new Float:virtframetime = 0.01; // 100 tickrate
-new bool:enabled = true;
-new bool:defaultAutohop = true;
-new bool:defaultSpeedo = false;
-new bool:duckjump = true;
+new Float:speedcap          = -1.0;
+new Float:virtframetime     = 0.01; // 100 tickrate
+new bool:enabled            = true;
+new bool:defaultAutohop     = true;
+new bool:defaultSpeedo      = false;
+new bool:duckjump           = true;
 
-new Float:sv_friction = 4.0;
-new Float:sv_stopspeed = 100.0;
-new Float:sv_accelerate = 10.0;
-new Float:sv_airaccelerate = 10.0;
+new Float:sv_friction       = 4.0;
+new Float:sv_stopspeed      = 100.0;
+new Float:sv_accelerate     = 10.0;
+new Float:sv_airaccelerate  = 10.0;
 
 // Player data
 // Arrays are 1 bigger than MAXPLAYERS for the convenience of not having to
@@ -82,6 +83,9 @@ public Plugin:myinfo = {
 // Commands {{{
 public Action:toggleAutohop(client, args)
 {
+    if (!enabled)
+        return Plugin_Continue;
+
     if (HandleBoolCommand(client, args, "sm_autohop", autohop))
     {
         if (autohop[client])
@@ -95,6 +99,9 @@ public Action:toggleAutohop(client, args)
 
 public Action:toggleSpeedo(client, args)
 {
+    if (!enabled)
+        return Plugin_Continue;
+
     if (HandleBoolCommand(client, args, "sm_speed", showSpeed))
         PrintCenterText(client, "");
     return Plugin_Handled;
@@ -221,7 +228,8 @@ public OnPluginStart()
     HookConVarChange(cvarFrametime, ChangeFrametime);
 
     for (new i = 1; i <= MaxClients; i++)
-        SetupClient(i);
+        if (IsClientConnected(i))
+            SetupClient(i);
 }
 
 public OnClientPutInServer(client)
@@ -252,16 +260,24 @@ public DoStuffPost(client)
     if (GetMaxSpeed(client) != customMaxspeed[client])
         realMaxSpeeds[client] = GetMaxSpeed(client);
 
-    // Restore speed if above 520
-    if (!inair[client] && tmpvel[client] > 520.0)
+    // Speed correction
     {
         decl Float:vel[3];
         GetVelocity(client, vel);
         new Float:speed = GetAbsVec(vel);
-        for (new i = 0; i < 2; i++)
-            vel[i] *= tmpvel[client] / speed;
-        DoFriction(client, vel);
-        TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, vel);
+
+        // Restore speed if above 520
+        if (!inair[client] && tmpvel[client] > 520.0)
+        {
+            ScaleVec(vel, tmpvel[client] / speed);
+            DoFriction(client, vel);
+            TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, vel);
+        }
+        else if (speedcap >= 0.0 && speed > speedcap)
+        {
+            ScaleVec(vel, speedcap / speed);
+            TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, vel);
+        }
     }
 
     ShowSpeedo(client);
@@ -282,7 +298,9 @@ public DoStuffPre(client)
     CheckGround(client);
     HandleJumping(client, buttons, vel);
     DoInterpolation(client, buttons, wishdir, vel);
-    DoMovement(client, vel, wishdir, true);
+
+    if (!inair[client])
+        DoMovement(client, vel, wishdir, true);
 
 #if defined DEBUG
     for (new i = 0; i < 2; i++)
@@ -298,9 +316,11 @@ public DoStuffPre(client)
 #endif
 }
 
-DoMovement(client, Float:vel[3], Float:wishdir[3], bool:handleMaxspeed = true)
+DoMovement(client, Float:vel[3], Float:wishdir[3], bool:handleMaxspeed)
 {
     new Float:speed = GetAbsVec(vel);
+
+    // Backup speed
     tmpvel[client] = speed;
 
     if (speed == 0.0)
@@ -323,8 +343,6 @@ DoMovement(client, Float:vel[3], Float:wishdir[3], bool:handleMaxspeed = true)
     if (handleMaxspeed)
     {
         speed = GetAbsVec(vel);
-        if (speedcap >= 0.0 && speed > speedcap)
-            speed = speedcap;
 
         // Set calculated speed as new maxspeed to limit the engine in its
         // acceleration, but also to prevent capping.
@@ -345,12 +363,12 @@ DoMovement(client, Float:vel[3], Float:wishdir[3], bool:handleMaxspeed = true)
             // But, since there's no way to change the air cap to enforce a
             // lower acceleration (because it's hardcoded in the engine),
             // the engine will use 30 instead of the lower virtual value.
-            // This is nearly impossible to notice, though, especially with
-            // these high interpolation rates.
+            // This is basically impossible to notice, though, especially
+            // with these high interpolation rates.
             // It could be fixed by setting the maxspeed to 0, to prevent
             // the engine from doing any movement, and then setting the
-            // velocity using TeleportEntity(), but it seems a bit too
-            // overkill at the moment.
+            // velocity using TeleportEntity(), but that seems a bit too
+            // overkill.
         }
 
 #if defined DEBUG
@@ -441,8 +459,7 @@ DoFriction(client, Float:vel[3])
         new Float:scale = (speed - drop) / speed;
         if (scale < 0.0)
             scale = 0.0;
-        for (new i = 0; i < 2; i++)
-            vel[i] *= scale;
+        ScaleVec(vel, scale);
 
 #if defined DEBUG
         debugFrictionDrop = drop;
@@ -590,7 +607,7 @@ GetWishdir(client, buttons, Float:wishdir[3])
 // Setup, Variables, Misc, ... {{{
 SetupClient(client)
 {
-    if (!IsClientConnected(client) || IsFakeClient(client) || client < 1 || client > MAXPLAYERS)
+    if (IsFakeClient(client) || client < 1 || client > MAXPLAYERS)
         return;
 
     autohop[client] = defaultAutohop;
@@ -638,7 +655,13 @@ Float:GetAngleDiff(Float:a, Float:b)
 }
 
 // 2D Vector functions {{{
-//
+
+ScaleVec(Float:vec[], Float:scale)
+{
+    for (new i = 0; i < 2; i++)
+        vec[i] *= scale;
+}
+
 Float:DotProduct(const Float:a[], const Float:b[])
 {
     return a[0] * b[0] + a[1] * b[1];
