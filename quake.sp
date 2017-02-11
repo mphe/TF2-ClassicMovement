@@ -12,8 +12,7 @@
 
 #define DEBUG
 
-// TODO: version cvar,
-//       use GetEntityFlags to check for ground and water,
+// TODO: version cvar
 
 // Variables {{{
 // Plugin cvars
@@ -34,7 +33,7 @@ new Handle:cvarAirAccelerate    = INVALID_HANDLE;
 new Float:speedcap          = -1.0;
 new Float:virtframetime     = 0.01; // 100 tickrate
 new bool:enabled            = true;
-new bool:allowAutohop     = true;
+new bool:allowAutohop       = true;
 new bool:defaultSpeedo      = false;
 new bool:duckjump           = true;
 
@@ -522,11 +521,7 @@ Accelerate(client, Float:vel[3], const Float:wishdir[3])
 
 CheckGround(client)
 {
-    if (GetEntPropEnt(client, Prop_Send, "m_hGroundEntity") == -1)
-    {
-        inair[client] = true;
-    }
-    else
+    if (GetEntityFlags(client) & FL_ONGROUND)
     {
         landframe[client] = false;
         if (inair[client])
@@ -534,6 +529,10 @@ CheckGround(client)
             inair[client] = false;
             landframe[client] = true;
         }
+    }
+    else
+    {
+        inair[client] = true;
     }
 }
 // }}}
@@ -630,7 +629,8 @@ Float:GetFriction(client)
 
 bool:InWater(client)
 {
-    return GetEntProp(client, Prop_Send, "m_nWaterLevel") != 0;
+    // Double negate to avoid tag mismatch warning
+    return !!(GetEntityFlags(client) & FL_INWATER);
 }
 
 Float:GetMaxSpeed(client)
