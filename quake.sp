@@ -14,7 +14,6 @@
 
 // TODO: version cvar,
 //       use GetEntityFlags to check for ground and water,
-//       allow/disable autohop globally
 
 // Variables {{{
 // Plugin cvars
@@ -35,7 +34,7 @@ new Handle:cvarAirAccelerate    = INVALID_HANDLE;
 new Float:speedcap          = -1.0;
 new Float:virtframetime     = 0.01; // 100 tickrate
 new bool:enabled            = true;
-new bool:defaultAutohop     = true;
+new bool:allowAutohop     = true;
 new bool:defaultSpeedo      = false;
 new bool:duckjump           = true;
 
@@ -86,14 +85,20 @@ public Action:toggleAutohop(client, args)
     if (!enabled)
         return Plugin_Continue;
 
-    if (HandleBoolCommand(client, args, "sm_autohop", autohop))
+    if (allowAutohop)
     {
-        if (autohop[client])
-            ReplyToCommand(client, "[QM] Autohopping enabled");
-        else
-            ReplyToCommand(client, "[QM] Autohopping disabled");
+        if (HandleBoolCommand(client, args, "sm_autohop", autohop))
+        {
+            if (autohop[client])
+                ReplyToCommand(client, "[QM] Autohopping enabled");
+            else
+                ReplyToCommand(client, "[QM] Autohopping disabled");
+        }
     }
-
+    else
+    {
+        ReplyToCommand(client, "[QM] Autohopping is disabled on this server");
+    }
     return Plugin_Handled;
 }
 
@@ -153,7 +158,12 @@ public ChangeDuckJump(Handle:convar, const String:oldValue[], const String:newVa
 
 public ChangeAutohop(Handle:convar, const String:oldValue[], const String:newValue[])
 {
-    defaultAutohop = GetConVarBool(convar);
+    if (allowAutohop != GetConVarBool(convar))
+    {
+        allowAutohop = GetConVarBool(convar);
+        for (new i = 1; i <= MaxClients; i++)
+            autohop[i] = allowAutohop;
+    }
 }
 
 public ChangeMaxspeed(Handle:convar, const String:oldValue[], const String:newValue[])
@@ -199,12 +209,12 @@ public OnPluginStart()
     RegConsoleCmd("sm_speed", toggleSpeedo, "Toggle speedometer on/off");
     RegConsoleCmd("sm_autohop", toggleAutohop, "Toggle autohopping on/off");
 
-    cvarEnabled   = CreateConVar("qm_enabled",     "1", "Enable/Disable Quake movement.");
-    cvarAutohop   = CreateConVar("qm_autohop",     "1", "Automatically jump while holding jump.");
-    cvarSpeedo    = CreateConVar("qm_speedo",      "0", "Show speedometer.");
-    cvarDuckJump  = CreateConVar("qm_duckjump",    "1", "Allow jumping while being ducked.");
-    cvarMaxspeed  = CreateConVar("qm_maxspeed", "-1.0", "The maximum speed players can reach.");
-    cvarFrametime = CreateConVar("qm_frametime","0.01", "Virtual frametime (in seconds) to simulate a higher tickrate. 0 to disable. Values higher than 0.015 have no effect.");
+    cvarEnabled   = CreateConVar("qm_enabled",       "1", "Enable/Disable Quake movement.");
+    cvarAutohop   = CreateConVar("qm_allow_autohop", "1", "Allow users to jump automatically by holding jump.");
+    cvarSpeedo    = CreateConVar("qm_speedo",        "0", "Show speedometer.");
+    cvarDuckJump  = CreateConVar("qm_duckjump",      "1", "Allow jumping while being ducked.");
+    cvarMaxspeed  = CreateConVar("qm_speedcap",   "-1.0", "The maximum speed players can reach.");
+    cvarFrametime = CreateConVar("qm_frametime",  "0.01", "Virtual frametime (in seconds) to simulate a higher tickrate. 0 to disable. Values higher than 0.015 have no effect.");
 
     cvarFriction = FindConVar("sv_friction");
     cvarStopspeed = FindConVar("sv_stopspeed");
@@ -599,7 +609,7 @@ SetupClient(client)
     if (IsFakeClient(client) || client < 1 || client > MAXPLAYERS)
         return;
 
-    autohop[client] = defaultAutohop;
+    autohop[client] = allowAutohop;
     showSpeed[client] = defaultSpeedo;
     oldbuttons[client] = 0;
     virtticks[client] = 0.0;
