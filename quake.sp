@@ -12,7 +12,8 @@
 
 #define DEBUG
 
-// TODO: version cvar
+#define PLUGIN_VERSION "1.0.0"
+
 
 // Variables {{{
 // Plugin cvars
@@ -72,7 +73,7 @@ public Plugin:myinfo = {
     name            = "Quake Movement",
     author          = "mphe",
     description     = "Quake/HL1 like movement",
-    version         = "1.0.0",
+    version         = PLUGIN_VERSION,
     url             = "http://www.sourcemod.net"
 };
 // }}}
@@ -208,6 +209,7 @@ public OnPluginStart()
     RegConsoleCmd("sm_speed", toggleSpeedo, "Toggle speedometer on/off");
     RegConsoleCmd("sm_autohop", toggleAutohop, "Toggle autohopping on/off");
 
+    CreateConVar("quakemovement_version", PLUGIN_VERSION, "Quake Movement version", FCVAR_SPONLY | FCVAR_REPLICATED | FCVAR_NOTIFY);
     cvarEnabled   = CreateConVar("qm_enabled",       "1", "Enable/Disable Quake movement.");
     cvarAutohop   = CreateConVar("qm_allow_autohop", "1", "Allow users to jump automatically by holding jump.");
     cvarSpeedo    = CreateConVar("qm_speedo",        "0", "Show speedometer.");
