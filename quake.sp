@@ -175,7 +175,10 @@ public ChangeFrametime(Handle:convar, const String:oldValue[], const String:newV
 {
     virtframetime = GetConVarFloat(convar);
     if (virtframetime < 0.0 || virtframetime >= GetTickInterval())
+    {
         virtframetime = 0.0;
+        LogError("Virtual frametime negative or too high -> disabled.");
+    }
 
     for (new i = 1; i <= MaxClients; i++)
         virtticks[i] = 0.0;
@@ -212,9 +215,9 @@ public OnPluginStart()
     CreateConVar("quakemovement_version", PLUGIN_VERSION, "Quake Movement version", FCVAR_SPONLY | FCVAR_REPLICATED | FCVAR_NOTIFY);
     cvarEnabled   = CreateConVar("qm_enabled",       "1", "Enable/Disable Quake movement.");
     cvarAutohop   = CreateConVar("qm_allow_autohop", "1", "Allow users to jump automatically by holding jump.");
-    cvarSpeedo    = CreateConVar("qm_speedo",        "0", "Show speedometer.");
+    cvarSpeedo    = CreateConVar("qm_speedo",        "0", "Show speedometer by default.");
     cvarDuckJump  = CreateConVar("qm_duckjump",      "1", "Allow jumping while being ducked.");
-    cvarMaxspeed  = CreateConVar("qm_speedcap",   "-1.0", "The maximum speed players can reach.");
+    cvarMaxspeed  = CreateConVar("qm_speedcap",   "-1.0", "The maximum speed players can reach. -1 for unlimited.");
     cvarFrametime = CreateConVar("qm_frametime",  "0.01", "Virtual frametime (in seconds) to simulate a higher tickrate. 0 to disable. Values higher than 0.015 have no effect.");
 
     cvarFriction = FindConVar("sv_friction");
