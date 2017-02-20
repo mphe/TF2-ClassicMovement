@@ -212,7 +212,7 @@ public OnPluginStart()
     RegConsoleCmd("sm_speed", toggleSpeedo, "Toggle speedometer on/off");
     RegConsoleCmd("sm_autohop", toggleAutohop, "Toggle autohopping on/off");
 
-    CreateConVar("quakemovement_version", PLUGIN_VERSION, "Quake Movement version", FCVAR_SPONLY | FCVAR_REPLICATED | FCVAR_NOTIFY);
+    CreateConVar("quakemovement_version", PLUGIN_VERSION, "Quake Movement version", FCVAR_SPONLY | FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DONTRECORD);
     cvarEnabled   = CreateConVar("qm_enabled",       "1", "Enable/Disable Quake movement.");
     cvarAutohop   = CreateConVar("qm_allow_autohop", "1", "Allow users to jump automatically by holding jump.");
     cvarSpeedo    = CreateConVar("qm_speedo",        "0", "Show speedometer by default.");
@@ -240,6 +240,20 @@ public OnPluginStart()
     HookConVarChange(cvarAccelerate, ChangeAccelerate);
     HookConVarChange(cvarAirAccelerate, ChangeAirAccelerate);
     HookConVarChange(cvarFrametime, ChangeFrametime);
+
+    // Update variables in case the plugin gets reloaded
+    ChangeEnabled(cvarEnabled, "", "");
+    ChangeAutohop(cvarAutohop, "", "");
+    ChangeSpeedo(cvarSpeedo, "", "");
+    ChangeDuckJump(cvarDuckJump, "", "");
+    ChangeMaxspeed(cvarMaxspeed, "", "");
+    ChangeFriction(cvarFriction, "", "");
+    ChangeStopspeed(cvarStopspeed, "", "");
+    ChangeAccelerate(cvarAccelerate, "", "");
+    ChangeAirAccelerate(cvarAirAccelerate, "", "");
+    ChangeFrametime(cvarFrametime, "", "");
+
+    AutoExecConfig(true);
 
     for (new i = 1; i <= MaxClients; i++)
         if (IsClientConnected(i))
