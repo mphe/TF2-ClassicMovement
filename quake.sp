@@ -288,10 +288,11 @@ public DoStuffPost(client)
     if (GetMaxSpeed(client) != customMaxspeed[client])
         realMaxSpeeds[client] = GetMaxSpeed(client);
 
+    decl Float:vel[3];
+    GetVelocity(client, vel);
+
     // Speed correction
     {
-        decl Float:vel[3];
-        GetVelocity(client, vel);
         new Float:speed = GetAbsVec(vel);
 
         // Restore speed if above 520
@@ -308,7 +309,7 @@ public DoStuffPost(client)
         }
     }
 
-    ShowSpeedo(client);
+    ShowSpeedo(client, vel);
 
     // Reset max speed
     SetMaxSpeed(client, realMaxSpeeds[client]);
@@ -339,14 +340,14 @@ public DoStuffPre(client)
         debugVel[i] = vel[i];
     decl Float:dir[3];
     GetClientEyeAngles(client, dir);
-    debugEyeAngle = 180.0 + dir[1];
+    debugEyeAngle = dir[1];
     debugAngle = RoundFloat(FloatAbs(dir[1])) % 45;
     if (debugAngle > 30)
         debugAngle = 45 - debugAngle;
 #endif
 }
 
-DoMovement(client, Float:vel[3], Float:wishdir[3], bool:handleMaxspeed)
+DoMovement(client, Float:vel[3], const Float:wishdir[3], bool:handleMaxspeed)
 {
     new Float:speed = GetAbsVec(vel);
 
@@ -356,24 +357,16 @@ DoMovement(client, Float:vel[3], Float:wishdir[3], bool:handleMaxspeed)
     if (speed == 0.0)
         return;
 
-    new Float:maxspeed = realMaxSpeeds[client];
-    new Float:drop = GetFrictionDrop(client, speed);
-    new Float:acc = GetAcceleration(client, maxspeed);
-
-    // No need to intervene if the maximum gainable speed is still below maxspeed
-    if (speed - drop + acc <= maxspeed)
-        return;
-
     if (wishdir[0] != 0.0 || wishdir[1] != 0.0)
     {
         DoFriction(client, vel);
         Accelerate(client, vel, wishdir);
     }
 
-    if (handleMaxspeed)
-    {
-        speed = GetAbsVec(vel);
+    speed = GetAbsVec(vel);
 
+    if (handleMaxspeed && speed > realMaxSpeeds[client])
+    {
         // Set calculated speed as new maxspeed to limit the engine in its
         // acceleration, but also to prevent capping.
         if (FloatAbs(speed - realMaxSpeeds[client]) > 0.1)
@@ -407,7 +400,7 @@ DoMovement(client, Float:vel[3], Float:wishdir[3], bool:handleMaxspeed)
     }
 }
 
-DoInterpolation(client, buttons, Float:wishdir[3], Float:vel[3])
+DoInterpolation(client, buttons, const Float:wishdir[3], Float:vel[3])
 {
 #if defined DEBUG
     debugVirtTicks = 0;
@@ -418,8 +411,12 @@ DoInterpolation(client, buttons, Float:wishdir[3], Float:vel[3])
 
     new Float:angle = GetVecAngle(wishdir);
 
+    // Extract movement keys only
+    new mvbuttons = buttons & (IN_FORWARD | IN_BACK | IN_MOVELEFT | IN_MOVERIGHT),
+        oldmvbuttons = oldbuttons[client] & (IN_FORWARD | IN_BACK | IN_MOVELEFT | IN_MOVERIGHT);
+
     if (inair[client] && !InWater(client)
-            && buttons == oldbuttons[client]
+            && mvbuttons == oldmvbuttons
             && (wishdir[0] != 0 || wishdir[1] != 0))
     {
         // Subtract one for the current frame.
@@ -428,8 +425,11 @@ DoInterpolation(client, buttons, Float:wishdir[3], Float:vel[3])
         if (virtticks[client] >= 1.0)
         {
             new ticks = RoundToFloor(virtticks[client]);
-            new Float:step = GetAngleDiff(oldangle[client], angle) / (ticks + 1);
             virtticks[client] -= ticks;
+
+            // Angles must be converted to 0-360 range -> +180
+            new Float:step = GetAngleDiff(180.0 + oldangle[client],
+                    180.0 + angle) / (ticks + 1);
 
             if (step != 0.0)
             {
@@ -440,6 +440,7 @@ DoInterpolation(client, buttons, Float:wishdir[3], Float:vel[3])
                     DoMovement(client, vel, intwishdir, false);
                 }
                 TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, vel);
+
 #if defined DEBUG
                 debugVirtTicks = ticks;
 #endif
@@ -484,27 +485,24 @@ DoFriction(client, Float:vel[3])
     }
 }
 
-ShowSpeedo(client)
+ShowSpeedo(client, const Float:vel[3])
 {
     if (showSpeed[client])
     {
-        decl Float:vel[3];
-        GetVelocity(client, vel);
-        new Float:abs = GetAbsVec(vel);
 #if defined DEBUG
-        PrintCenterText(client, "realvel: %f\n%f\n%f\npredicted: %f\nmaxspeed: %f, %f\nproj: %f\nwishdir: (%f;%f)\nacc: %f\ndrop: %f %f\neye angle: %f, %i\ninterpolated frames: %i, %f",
-                abs, vel[0], vel[1],
+        PrintCenterText(client, "realvel: %f\n%f\n%f\npredicted: %f\nmaxspeed: %f, %f\nproj: %f\nwishdir: (%f;%f) -> %f\nacc: %f\ndrop: %f %f\neye angle: %f, %i\ninterpolated frames: %i, %f",
+                GetAbsVec(vel), vel[0], vel[1],
                 debugSpeed,
                 realMaxSpeeds[client], GetMaxSpeed(client),
                 debugProj,
-                debugWishdir[0], debugWishdir[1],
+                debugWishdir[0], debugWishdir[1], GetVecAngle(debugWishdir),
                 debugAcc,
                 GetFriction(client), debugFrictionDrop,
                 debugEyeAngle, debugAngle,
                 debugVirtTicks, virtticks[client]
                 );
 #else
-        PrintCenterText(client, "%f", abs);
+        PrintCenterText(client, "%f", GetAbsVec(vel));
 #endif
     }
 }
@@ -665,11 +663,19 @@ Float:SetMaxSpeed(client, Float:speed)
 
 // Math {{{
 
-// Returns a signed difference between two angles.
+// Returns the smallest signed difference between two angles.
+// Input values must be between 0 and 360. Everything else is undefined.
 Float:GetAngleDiff(Float:a, Float:b)
 {
-    // Apparently there's no float modulo function
-    return float(RoundFloat(b - a + 180.0) % 360) - 180;
+    new Float:diff = b - a;
+    if (FloatAbs(diff) > 180)
+        return sign(-diff) * (360.0 - FloatAbs(diff));
+    return diff;
+}
+
+Float:sign(Float:x)
+{
+    return x < 0 ? -1.0 : x > 0 ? 1.0 : 0.0;
 }
 
 // 2D Vector functions {{{
