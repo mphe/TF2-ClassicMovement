@@ -16,6 +16,7 @@
 
 
 // Variables {{{
+// Handles {{{
 // Plugin cvars
 new Handle:cvarEnabled      = INVALID_HANDLE;
 new Handle:cvarAutohop      = INVALID_HANDLE;
@@ -23,12 +24,17 @@ new Handle:cvarSpeedo       = INVALID_HANDLE;
 new Handle:cvarMaxspeed     = INVALID_HANDLE;
 new Handle:cvarDuckJump     = INVALID_HANDLE;
 new Handle:cvarFrametime    = INVALID_HANDLE;
+new Handle:cvarUseAdvHud    = INVALID_HANDLE;
 
 // Engine cvars
 new Handle:cvarFriction         = INVALID_HANDLE;
 new Handle:cvarStopspeed        = INVALID_HANDLE;
 new Handle:cvarAccelerate       = INVALID_HANDLE;
 new Handle:cvarAirAccelerate    = INVALID_HANDLE;
+
+// Sync HUD handle
+new Handle:hndSpeedo = INVALID_HANDLE;
+// }}}
 
 // Global settings
 new Float:speedcap          = -1.0;
@@ -37,6 +43,7 @@ new bool:enabled            = true;
 new bool:allowAutohop       = true;
 new bool:defaultSpeedo      = false;
 new bool:duckjump           = true;
+new bool:useAdvHud          = true;
 
 new Float:sv_friction       = 4.0;
 new Float:sv_stopspeed      = 100.0;
@@ -108,34 +115,14 @@ public Action:toggleSpeedo(client, args)
         return Plugin_Continue;
 
     if (HandleBoolCommand(client, args, "sm_speed", showSpeed))
-        PrintCenterText(client, "");
-    return Plugin_Handled;
-}
-
-bool:HandleBoolCommand(client, args, const String:cmd[], bool:variable[])
-{
-    if (args == 0)
-        variable[client] = !variable[client];
-    else
     {
-        new String:buf[5];
-        GetCmdArg(1, buf, sizeof(buf));
-
-        if (strcmp(buf, "on", false) == 0)
-            variable[client] = true;
-        else if (strcmp(buf, "off", false) == 0)
-            variable[client] = false;
+        if (useAdvHud)
+            ClearSyncHud(client, hndSpeedo);
+            // ShowSyncHudText(client, hndSpeedo, "");
         else
-        {
-            decl String:reply[100] = "[QM] Syntax: ";
-            StrCat(reply, sizeof(reply), cmd);
-            StrCat(reply, sizeof(reply),  " [on|off]");
-            ReplyToCommand(client, reply);
-            return false;
-        }
+            PrintCenterText(client, "");
     }
-
-    return true;
+    return Plugin_Handled;
 }
 // }}}
 
@@ -184,6 +171,18 @@ public ChangeFrametime(Handle:convar, const String:oldValue[], const String:newV
         virtticks[i] = 0.0;
 }
 
+public ChangeHudType(Handle:convar, const String:oldValue[], const String:newValue[])
+{
+    useAdvHud = GetConVarBool(convar);
+
+    if (useAdvHud && hndSpeedo == INVALID_HANDLE)
+    {
+        hndSpeedo = CreateHudSynchronizer();
+        if (hndSpeedo == INVALID_HANDLE)
+            useAdvHud = false;
+    }
+}
+
 public ChangeFriction(Handle:convar, const String:oldValue[], const String:newValue[])
 {
     sv_friction = GetConVarFloat(convar);
@@ -212,46 +211,44 @@ public OnPluginStart()
     RegConsoleCmd("sm_speed", toggleSpeedo, "Toggle speedometer on/off");
     RegConsoleCmd("sm_autohop", toggleAutohop, "Toggle autohopping on/off");
 
-    CreateConVar("quakemovement_version", PLUGIN_VERSION, "Quake Movement version", FCVAR_SPONLY | FCVAR_REPLICATED | FCVAR_NOTIFY | FCVAR_DONTRECORD);
+    CreateConVar("quakemovement_version", PLUGIN_VERSION, "Quake Movement version", FCVAR_SPONLY | FCVAR_NOTIFY | FCVAR_DONTRECORD);
     cvarEnabled   = CreateConVar("qm_enabled",       "1", "Enable/Disable Quake movement.");
     cvarAutohop   = CreateConVar("qm_allow_autohop", "1", "Allow users to jump automatically by holding jump.");
     cvarSpeedo    = CreateConVar("qm_speedo",        "0", "Show speedometer by default.");
     cvarDuckJump  = CreateConVar("qm_duckjump",      "1", "Allow jumping while being ducked.");
     cvarMaxspeed  = CreateConVar("qm_speedcap",   "-1.0", "The maximum speed players can reach. -1 for unlimited.");
     cvarFrametime = CreateConVar("qm_frametime",  "0.01", "Virtual frametime (in seconds) to simulate a higher tickrate. 0 to disable. Values higher than 0.015 have no effect.");
+    cvarUseAdvHud = CreateConVar("qm_advanced_hud",  "1", "Whether or not to use an advanced speedometer HUD.");
 
-    cvarFriction = FindConVar("sv_friction");
-    cvarStopspeed = FindConVar("sv_stopspeed");
-    cvarAccelerate = FindConVar("sv_accelerate");
+    cvarFriction      = FindConVar("sv_friction");
+    cvarStopspeed     = FindConVar("sv_stopspeed");
+    cvarAccelerate    = FindConVar("sv_accelerate");
     cvarAirAccelerate = FindConVar("sv_airaccelerate");
-
-    sv_friction = GetConVarFloat(cvarFriction);
-    sv_stopspeed = GetConVarFloat(cvarStopspeed);
-    sv_accelerate = GetConVarFloat(cvarAccelerate);
-    sv_airaccelerate = GetConVarFloat(cvarAirAccelerate);
 
     HookConVarChange(cvarEnabled, ChangeEnabled);
     HookConVarChange(cvarAutohop, ChangeAutohop);
     HookConVarChange(cvarSpeedo, ChangeSpeedo);
     HookConVarChange(cvarDuckJump, ChangeDuckJump);
     HookConVarChange(cvarMaxspeed, ChangeMaxspeed);
+    HookConVarChange(cvarFrametime, ChangeFrametime);
+    HookConVarChange(cvarUseAdvHud, ChangeHudType);
     HookConVarChange(cvarFriction, ChangeFriction);
     HookConVarChange(cvarStopspeed, ChangeStopspeed);
     HookConVarChange(cvarAccelerate, ChangeAccelerate);
     HookConVarChange(cvarAirAccelerate, ChangeAirAccelerate);
-    HookConVarChange(cvarFrametime, ChangeFrametime);
 
-    // Update variables in case the plugin gets reloaded
-    ChangeEnabled(cvarEnabled, "", "");
-    ChangeAutohop(cvarAutohop, "", "");
-    ChangeSpeedo(cvarSpeedo, "", "");
-    ChangeDuckJump(cvarDuckJump, "", "");
-    ChangeMaxspeed(cvarMaxspeed, "", "");
-    ChangeFriction(cvarFriction, "", "");
-    ChangeStopspeed(cvarStopspeed, "", "");
-    ChangeAccelerate(cvarAccelerate, "", "");
-    ChangeAirAccelerate(cvarAirAccelerate, "", "");
-    ChangeFrametime(cvarFrametime, "", "");
+    // Update variables in case the plugin was reloaded
+    ChangeEnabled       (cvarEnabled, "", "");
+    ChangeAutohop       (cvarAutohop, "", "");
+    ChangeSpeedo        (cvarSpeedo, "", "");
+    ChangeDuckJump      (cvarDuckJump, "", "");
+    ChangeMaxspeed      (cvarMaxspeed, "", "");
+    ChangeFrametime     (cvarFrametime, "", "");
+    ChangeHudType       (cvarUseAdvHud, "", "");
+    ChangeFriction      (cvarFriction, "", "");
+    ChangeStopspeed     (cvarStopspeed, "", "");
+    ChangeAccelerate    (cvarAccelerate, "", "");
+    ChangeAirAccelerate (cvarAirAccelerate, "", "");
 
     AutoExecConfig(true);
 
@@ -502,13 +499,19 @@ ShowSpeedo(client, const Float:vel[3])
                 debugVirtTicks, virtticks[client]
                 );
 #else
-        PrintCenterText(client, "%f", GetAbsVec(vel));
+        if (useAdvHud)
+        {
+            SetHudTextParams(-1.0, 0.8, 5.0, 255, 255, 0, 255);
+            ShowSyncHudText(client, hndSpeedo, "%i", RoundFloat(GetAbsVec(vel)));
+        }
+        else
+            PrintCenterText(client, "%i", RoundFloat(GetAbsVec(vel)));
 #endif
     }
 }
 
 // Basically the same accelerate code as in the Quake/GoldSrc/Source engine.
-// https://github.com/ValveSoftware/source-sdk-2013/blob/56accfdb9c4abd32ae1dc26b2e4cc87898cf4dc1/sp/src/game/shared/gamemovement.cpp#L1822
+// https://github.com/id-Software/Quake/blob/master/QW/client/pmove.c#L390
 Accelerate(client, Float:vel[3], const Float:wishdir[3])
 {
     new Float:maxspeed = realMaxSpeeds[client];
@@ -658,6 +661,32 @@ Float:GetMaxSpeed(client)
 Float:SetMaxSpeed(client, Float:speed)
 {
     SetEntPropFloat(client, Prop_Data, "m_flMaxspeed", speed);
+}
+
+bool:HandleBoolCommand(client, args, const String:cmd[], bool:variable[])
+{
+    if (args == 0)
+        variable[client] = !variable[client];
+    else
+    {
+        new String:buf[5];
+        GetCmdArg(1, buf, sizeof(buf));
+
+        if (strcmp(buf, "on", false) == 0)
+            variable[client] = true;
+        else if (strcmp(buf, "off", false) == 0)
+            variable[client] = false;
+        else
+        {
+            decl String:reply[100] = "[QM] Syntax: ";
+            StrCat(reply, sizeof(reply), cmd);
+            StrCat(reply, sizeof(reply),  " [on|off]");
+            ReplyToCommand(client, reply);
+            return false;
+        }
+    }
+
+    return true;
 }
 // }}}
 
