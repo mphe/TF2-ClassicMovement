@@ -24,6 +24,7 @@ new Handle:cvarMaxspeed     = INVALID_HANDLE;
 new Handle:cvarDuckJump     = INVALID_HANDLE;
 new Handle:cvarFrametime    = INVALID_HANDLE;
 new Handle:cvarUseAdvHud    = INVALID_HANDLE;
+new Handle:cvarHudColor     = INVALID_HANDLE;
 
 // Engine cvars
 new Handle:cvarFriction         = INVALID_HANDLE;
@@ -42,6 +43,7 @@ new bool:gDuckjump          = true;
 new bool:gUseAdvHud         = true;
 new Float:gSpeedcap         = -1.0;
 new Float:gVirtFrametime    = 0.01; // 100 tickrate
+new gHudColor[3]            = { 255, 255, 0 };
 
 new Float:sv_friction       = 4.0;
 new Float:sv_stopspeed      = 100.0;
@@ -181,6 +183,17 @@ public ChangeHudType(Handle:convar, const String:oldValue[], const String:newVal
     }
 }
 
+public ChangeHudColor(Handle:convar, const String:oldValue[], const String:newValue[])
+{
+    new String:color[21], String:values[3][4];
+    GetConVarString(convar, color, 20);
+
+    new num = ExplodeString(color, " ", values, 3, 4, false);
+
+    for (new i = 0; i < num; i++)
+        gHudColor[i] = StringToInt(values[i]);
+}
+
 public ChangeFriction(Handle:convar, const String:oldValue[], const String:newValue[])
 {
     sv_friction = GetConVarFloat(convar);
@@ -217,6 +230,7 @@ public OnPluginStart()
     cvarMaxspeed  = CreateConVar("qm_speedcap",   "-1.0", "The maximum speed players can reach. -1 for unlimited.");
     cvarFrametime = CreateConVar("qm_frametime",  "0.01", "Virtual frametime (in seconds) to simulate a higher tickrate. 0 to disable. Values higher than 0.015 have no effect.");
     cvarUseAdvHud = CreateConVar("qm_advanced_hud",  "1", "Whether or not to use an advanced speedometer HUD.");
+    cvarHudColor  = CreateConVar("qm_hud_color", "255 255 0", "Speedometer HUD color. Syntax: qm_hud_color \"R G B\"");
 
     cvarFriction      = FindConVar("sv_friction");
     cvarStopspeed     = FindConVar("sv_stopspeed");
@@ -230,6 +244,7 @@ public OnPluginStart()
     HookConVarChange(cvarMaxspeed, ChangeMaxspeed);
     HookConVarChange(cvarFrametime, ChangeFrametime);
     HookConVarChange(cvarUseAdvHud, ChangeHudType);
+    HookConVarChange(cvarHudColor, ChangeHudColor);
     HookConVarChange(cvarFriction, ChangeFriction);
     HookConVarChange(cvarStopspeed, ChangeStopspeed);
     HookConVarChange(cvarAccelerate, ChangeAccelerate);
@@ -243,6 +258,7 @@ public OnPluginStart()
     ChangeMaxspeed      (cvarMaxspeed, "", "");
     ChangeFrametime     (cvarFrametime, "", "");
     ChangeHudType       (cvarUseAdvHud, "", "");
+    ChangeHudColor      (cvarHudColor, "", "");
     ChangeFriction      (cvarFriction, "", "");
     ChangeStopspeed     (cvarStopspeed, "", "");
     ChangeAccelerate    (cvarAccelerate, "", "");
@@ -499,7 +515,7 @@ ShowSpeedo(client, const Float:vel[3])
 #else
         if (gUseAdvHud)
         {
-            SetHudTextParams(-1.0, 0.8, 5.0, 255, 255, 0, 255);
+            SetHudTextParams(-1.0, 0.8, 5.0, gHudColor[0], gHudColor[1], gHudColor[2], 255);
             ShowSyncHudText(client, hndSpeedo, "%i", RoundFloat(GetAbsVec(vel)));
         }
         else
