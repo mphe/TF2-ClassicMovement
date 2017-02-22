@@ -16,7 +16,6 @@
 
 
 // Variables {{{
-// Handles {{{
 // Plugin cvars
 new Handle:cvarEnabled      = INVALID_HANDLE;
 new Handle:cvarAutohop      = INVALID_HANDLE;
@@ -34,16 +33,15 @@ new Handle:cvarAirAccelerate    = INVALID_HANDLE;
 
 // Sync HUD handle
 new Handle:hndSpeedo = INVALID_HANDLE;
-// }}}
 
 // Global settings
-new Float:speedcap          = -1.0;
-new Float:virtframetime     = 0.01; // 100 tickrate
-new bool:enabled            = true;
-new bool:allowAutohop       = true;
-new bool:defaultSpeedo      = false;
-new bool:duckjump           = true;
-new bool:useAdvHud          = true;
+new bool:gEnabled           = true;
+new bool:gAllowAutohop      = true;
+new bool:gDefaultSpeedo     = false;
+new bool:gDuckjump          = true;
+new bool:gUseAdvHud         = true;
+new Float:gSpeedcap         = -1.0;
+new Float:gVirtFrametime    = 0.01; // 100 tickrate
 
 new Float:sv_friction       = 4.0;
 new Float:sv_stopspeed      = 100.0;
@@ -53,16 +51,16 @@ new Float:sv_airaccelerate  = 10.0;
 // Player data
 // Arrays are 1 bigger than MAXPLAYERS for the convenience of not having to
 // write client - 1 every time when using a client id as index.
-new Float:customMaxspeed[MAXPLAYERS + 1];
-new Float:realMaxSpeeds [MAXPLAYERS + 1];
-new Float:tmpvel        [MAXPLAYERS + 1];
-new Float:oldangle      [MAXPLAYERS + 1];
-new Float:virtticks     [MAXPLAYERS + 1];
-new bool:autohop        [MAXPLAYERS + 1];
-new bool:showSpeed      [MAXPLAYERS + 1];
-new bool:inair          [MAXPLAYERS + 1];
-new bool:landframe      [MAXPLAYERS + 1];
-new oldbuttons          [MAXPLAYERS + 1];
+new Float:clCustomMaxspeed  [MAXPLAYERS + 1];
+new Float:clRealMaxspeed    [MAXPLAYERS + 1];
+new Float:clBackupSpeed     [MAXPLAYERS + 1];
+new Float:clOldAngle        [MAXPLAYERS + 1];
+new Float:clVirtTicks       [MAXPLAYERS + 1];
+new bool:clAutohop          [MAXPLAYERS + 1];
+new bool:clShowSpeedo       [MAXPLAYERS + 1];
+new bool:clInAir            [MAXPLAYERS + 1];
+new bool:clLandframe        [MAXPLAYERS + 1];
+new clOldButtons            [MAXPLAYERS + 1];
 
 #if defined DEBUG
 new Float:debugSpeed;
@@ -81,7 +79,7 @@ public Plugin:myinfo = {
     author          = "mphe",
     description     = "Quake/HL1 like movement",
     version         = PLUGIN_VERSION,
-    url             = "http://www.sourcemod.net"
+    url             = "https://github.com/mphe/tf2-quakemovement"
 };
 // }}}
 
@@ -89,14 +87,14 @@ public Plugin:myinfo = {
 // Commands {{{
 public Action:toggleAutohop(client, args)
 {
-    if (!enabled)
+    if (!gEnabled)
         return Plugin_Continue;
 
-    if (allowAutohop)
+    if (gAllowAutohop)
     {
-        if (HandleBoolCommand(client, args, "sm_autohop", autohop))
+        if (HandleBoolCommand(client, args, "sm_autohop", clAutohop))
         {
-            if (autohop[client])
+            if (clAutohop[client])
                 ReplyToCommand(client, "[QM] Autohopping enabled");
             else
                 ReplyToCommand(client, "[QM] Autohopping disabled");
@@ -111,12 +109,12 @@ public Action:toggleAutohop(client, args)
 
 public Action:toggleSpeedo(client, args)
 {
-    if (!enabled)
+    if (!gEnabled)
         return Plugin_Continue;
 
-    if (HandleBoolCommand(client, args, "sm_speed", showSpeed))
+    if (HandleBoolCommand(client, args, "sm_speed", clShowSpeedo))
     {
-        if (useAdvHud)
+        if (gUseAdvHud)
             ClearSyncHud(client, hndSpeedo);
             // ShowSyncHudText(client, hndSpeedo, "");
         else
@@ -130,56 +128,56 @@ public Action:toggleSpeedo(client, args)
 // Convar changed hooks {{{
 public ChangeEnabled(Handle:convar, const String:oldValue[], const String:newValue[])
 {
-    enabled = GetConVarBool(convar);
+    gEnabled = GetConVarBool(convar);
 }
 
 public ChangeSpeedo(Handle:convar, const String:oldValue[], const String:newValue[])
 {
-    defaultSpeedo = GetConVarBool(convar);
+    gDefaultSpeedo = GetConVarBool(convar);
 }
 
 public ChangeDuckJump(Handle:convar, const String:oldValue[], const String:newValue[])
 {
-    duckjump = GetConVarBool(convar);
+    gDuckjump = GetConVarBool(convar);
 }
 
 public ChangeAutohop(Handle:convar, const String:oldValue[], const String:newValue[])
 {
-    if (allowAutohop != GetConVarBool(convar))
+    if (gAllowAutohop != GetConVarBool(convar))
     {
-        allowAutohop = GetConVarBool(convar);
+        gAllowAutohop = GetConVarBool(convar);
         for (new i = 1; i <= MaxClients; i++)
-            autohop[i] = allowAutohop;
+            clAutohop[i] = gAllowAutohop;
     }
 }
 
 public ChangeMaxspeed(Handle:convar, const String:oldValue[], const String:newValue[])
 {
-    speedcap = GetConVarFloat(convar);
+    gSpeedcap = GetConVarFloat(convar);
 }
 
 public ChangeFrametime(Handle:convar, const String:oldValue[], const String:newValue[])
 {
-    virtframetime = GetConVarFloat(convar);
-    if (virtframetime < 0.0 || virtframetime >= GetTickInterval())
+    gVirtFrametime = GetConVarFloat(convar);
+    if (gVirtFrametime < 0.0 || gVirtFrametime >= GetTickInterval())
     {
-        virtframetime = 0.0;
+        gVirtFrametime = 0.0;
         LogError("Virtual frametime negative or too high -> disabled.");
     }
 
     for (new i = 1; i <= MaxClients; i++)
-        virtticks[i] = 0.0;
+        clVirtTicks[i] = 0.0;
 }
 
 public ChangeHudType(Handle:convar, const String:oldValue[], const String:newValue[])
 {
-    useAdvHud = GetConVarBool(convar);
+    gUseAdvHud = GetConVarBool(convar);
 
-    if (useAdvHud && hndSpeedo == INVALID_HANDLE)
+    if (gUseAdvHud && hndSpeedo == INVALID_HANDLE)
     {
         hndSpeedo = CreateHudSynchronizer();
         if (hndSpeedo == INVALID_HANDLE)
-            useAdvHud = false;
+            gUseAdvHud = false;
     }
 }
 
@@ -264,14 +262,14 @@ public OnClientPutInServer(client)
 
 public OnPreThink(client)
 {
-    if (!enabled || !IsClientInGame(client) || !IsPlayerAlive(client))
+    if (!gEnabled || !IsClientInGame(client) || !IsPlayerAlive(client))
         return;
     DoStuffPre(client);
 }
 
 public OnPostThink(client)
 {
-    if (!enabled || !IsClientInGame(client) || !IsPlayerAlive(client))
+    if (!gEnabled || !IsClientInGame(client) || !IsPlayerAlive(client))
         return;
     DoStuffPost(client);
 }
@@ -282,8 +280,8 @@ public OnPostThink(client)
 public DoStuffPost(client)
 {
     // Catch weapon related speed boosts (they don't appear in PreThink)
-    if (GetMaxSpeed(client) != customMaxspeed[client])
-        realMaxSpeeds[client] = GetMaxSpeed(client);
+    if (GetMaxSpeed(client) != clCustomMaxspeed[client])
+        clRealMaxspeed[client] = GetMaxSpeed(client);
 
     decl Float:vel[3];
     GetVelocity(client, vel);
@@ -293,15 +291,15 @@ public DoStuffPost(client)
         new Float:speed = GetAbsVec(vel);
 
         // Restore speed if above 520
-        if (!inair[client] && tmpvel[client] > 520.0)
+        if (!clInAir[client] && clBackupSpeed[client] > 520.0)
         {
-            ScaleVec(vel, tmpvel[client] / speed);
+            ScaleVec(vel, clBackupSpeed[client] / speed);
             DoFriction(client, vel);
             TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, vel);
         }
-        else if (speedcap >= 0.0 && speed > speedcap)
+        else if (gSpeedcap >= 0.0 && speed > gSpeedcap)
         {
-            ScaleVec(vel, speedcap / speed);
+            ScaleVec(vel, gSpeedcap / speed);
             TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, vel);
         }
     }
@@ -309,12 +307,12 @@ public DoStuffPost(client)
     ShowSpeedo(client, vel);
 
     // Reset max speed
-    SetMaxSpeed(client, realMaxSpeeds[client]);
+    SetMaxSpeed(client, clRealMaxspeed[client]);
 }
 
 public DoStuffPre(client)
 {
-    realMaxSpeeds[client] = GetMaxSpeed(client);
+    clRealMaxspeed[client] = GetMaxSpeed(client);
 
     new buttons = GetClientButtons(client);
     decl Float:vel[3], Float:wishdir[3];
@@ -325,10 +323,10 @@ public DoStuffPre(client)
     HandleJumping(client, buttons, vel);
     DoInterpolation(client, buttons, wishdir, vel);
 
-    if (!inair[client])
+    if (!clInAir[client])
         DoMovement(client, vel, wishdir, true);
 
-    oldbuttons[client] = buttons;
+    clOldButtons[client] = buttons;
 
 #if defined DEBUG
     for (new i = 0; i < 2; i++)
@@ -338,7 +336,7 @@ public DoStuffPre(client)
     decl Float:dir[3];
     GetClientEyeAngles(client, dir);
     debugEyeAngle = dir[1];
-    debugAngle = RoundFloat(FloatAbs(dir[1])) % 45;
+    debugAngle = RoundFloat(FloatAbs(dir[1])) % 45; // For testing wallstrafing
     if (debugAngle > 30)
         debugAngle = 45 - debugAngle;
 #endif
@@ -348,8 +346,7 @@ DoMovement(client, Float:vel[3], const Float:wishdir[3], bool:handleMaxspeed)
 {
     new Float:speed = GetAbsVec(vel);
 
-    // Backup speed
-    tmpvel[client] = speed;
+    clBackupSpeed[client] = speed;
 
     if (speed == 0.0)
         return;
@@ -362,13 +359,13 @@ DoMovement(client, Float:vel[3], const Float:wishdir[3], bool:handleMaxspeed)
 
     speed = GetAbsVec(vel);
 
-    if (handleMaxspeed && speed > realMaxSpeeds[client])
+    if (handleMaxspeed && speed > clRealMaxspeed[client])
     {
         // Set calculated speed as new maxspeed to limit the engine in its
         // acceleration, but also to prevent capping.
-        if (FloatAbs(speed - realMaxSpeeds[client]) > 0.1)
+        if (FloatAbs(speed - clRealMaxspeed[client]) > 0.1)
         {
-            customMaxspeed[client] = speed;
+            clCustomMaxspeed[client] = speed;
             SetMaxSpeed(client, speed);
 
             // NOTE:
@@ -376,8 +373,9 @@ DoMovement(client, Float:vel[3], const Float:wishdir[3], bool:handleMaxspeed)
             // frametime is so small that the virtual acceleration
             // (during airtime) returned by GetAcceleration() is smaller
             // than 30.
-            // Usually (up to a frametime of 0.009375) it doesn't matter,
-            // because the acceleartion is higher than 30. Therefore virtual
+            // Usually (up to a frametime of 0.009375, with
+            // sv_airaccelerate 10) it doesn't matter, because the
+            // acceleration is higher than 30. Therefore virtual
             // acceleration and real acceleration (as calculated by the
             // engine) come to the same result: 30.
             // But, since there's no way to change the air cap to enforce a
@@ -403,29 +401,29 @@ DoInterpolation(client, buttons, const Float:wishdir[3], Float:vel[3])
     debugVirtTicks = 0;
 #endif
 
-    if (virtframetime == 0.0)
+    if (gVirtFrametime == 0.0)
         return;
 
     new Float:angle = GetVecAngle(wishdir);
 
     // Extract movement keys only
     new mvbuttons = buttons & (IN_FORWARD | IN_BACK | IN_MOVELEFT | IN_MOVERIGHT),
-        oldmvbuttons = oldbuttons[client] & (IN_FORWARD | IN_BACK | IN_MOVELEFT | IN_MOVERIGHT);
+        oldmvbuttons = clOldButtons[client] & (IN_FORWARD | IN_BACK | IN_MOVELEFT | IN_MOVERIGHT);
 
-    if (inair[client] && !InWater(client)
+    if (clInAir[client] && !InWater(client)
             && mvbuttons == oldmvbuttons
             && (wishdir[0] != 0 || wishdir[1] != 0))
     {
         // Subtract one for the current frame.
-        virtticks[client] += (GetTickInterval() / virtframetime) - 1;
+        clVirtTicks[client] += (GetTickInterval() / gVirtFrametime) - 1;
 
-        if (virtticks[client] >= 1.0)
+        if (clVirtTicks[client] >= 1.0)
         {
-            new ticks = RoundToFloor(virtticks[client]);
-            virtticks[client] -= ticks;
+            new ticks = RoundToFloor(clVirtTicks[client]);
+            clVirtTicks[client] -= ticks;
 
             // Angles must be converted to 0-360 range -> +180
-            new Float:step = GetAngleDiff(180.0 + oldangle[client],
+            new Float:step = GetAngleDiff(180.0 + clOldAngle[client],
                     180.0 + angle) / (ticks + 1);
 
             if (step != 0.0)
@@ -433,7 +431,7 @@ DoInterpolation(client, buttons, const Float:wishdir[3], Float:vel[3])
                 new Float:intwishdir[3];
                 for (new i = 1; i <= ticks; i++)
                 {
-                    VecFromAngle(oldangle[client] + step * i, intwishdir);
+                    VecFromAngle(clOldAngle[client] + step * i, intwishdir);
                     DoMovement(client, vel, intwishdir, false);
                 }
                 TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, vel);
@@ -444,16 +442,16 @@ DoInterpolation(client, buttons, const Float:wishdir[3], Float:vel[3])
             }
         }
     }
-    oldangle[client] = angle;
+    clOldAngle[client] = angle;
 }
 
 HandleJumping(client, buttons, Float:vel[3])
 {
-    if (!inair[client] && buttons & IN_JUMP)
+    if (!clInAir[client] && buttons & IN_JUMP)
     {
         // Jumping while crouching or pressing jump while landing?
-        if ((duckjump && !(oldbuttons[client] & IN_JUMP) && buttons & IN_DUCK)
-                || (autohop[client] && landframe[client]))
+        if ((gDuckjump && !(clOldButtons[client] & IN_JUMP) && buttons & IN_DUCK)
+                || (clAutohop[client] && clLandframe[client]))
         {
             vel[2] = JUMP_SPEED;
             TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, vel);
@@ -463,7 +461,7 @@ HandleJumping(client, buttons, Float:vel[3])
 
 DoFriction(client, Float:vel[3])
 {
-    if (inair[client] || landframe[client])
+    if (clInAir[client] || clLandframe[client])
         return;
 
     new Float:speed = GetAbsVec(vel);
@@ -484,22 +482,22 @@ DoFriction(client, Float:vel[3])
 
 ShowSpeedo(client, const Float:vel[3])
 {
-    if (showSpeed[client])
+    if (clShowSpeedo[client])
     {
 #if defined DEBUG
-        PrintCenterText(client, "realvel: %f\n%f\n%f\npredicted: %f\nmaxspeed: %f, %f\nproj: %f\nwishdir: (%f;%f) -> %f\nacc: %f\ndrop: %f %f\neye angle: %f, %i\ninterpolated frames: %i, %f",
+        PrintCenterText(client, "realvel: %f\n%f\n%f\npredicted: %f\nmaxspeed: %f, %f\nproj: %f\nwishdir: (%f;%f)\nacc: %f\ndrop: %f %f\neye angle: %f, %i\ninterpolated frames: %i, %f",
                 GetAbsVec(vel), vel[0], vel[1],
                 debugSpeed,
-                realMaxSpeeds[client], GetMaxSpeed(client),
+                clRealMaxspeed[client], GetMaxSpeed(client),
                 debugProj,
-                debugWishdir[0], debugWishdir[1], GetVecAngle(debugWishdir),
+                debugWishdir[0], debugWishdir[1],
                 debugAcc,
                 GetFriction(client), debugFrictionDrop,
                 debugEyeAngle, debugAngle,
-                debugVirtTicks, virtticks[client]
+                debugVirtTicks, clVirtTicks[client]
                 );
 #else
-        if (useAdvHud)
+        if (gUseAdvHud)
         {
             SetHudTextParams(-1.0, 0.8, 5.0, 255, 255, 0, 255);
             ShowSyncHudText(client, hndSpeedo, "%i", RoundFloat(GetAbsVec(vel)));
@@ -514,9 +512,9 @@ ShowSpeedo(client, const Float:vel[3])
 // https://github.com/id-Software/Quake/blob/master/QW/client/pmove.c#L390
 Accelerate(client, Float:vel[3], const Float:wishdir[3])
 {
-    new Float:maxspeed = realMaxSpeeds[client];
+    new Float:maxspeed = clRealMaxspeed[client];
 
-    if (inair[client] && maxspeed > AIR_CAP)
+    if (clInAir[client] && maxspeed > AIR_CAP)
         maxspeed = AIR_CAP;
 
     new Float:currentspeed = DotProduct(vel, wishdir);
@@ -525,7 +523,7 @@ Accelerate(client, Float:vel[3], const Float:wishdir[3])
     if (addspeed < 0)
         return;
 
-    new Float:acc = GetAcceleration(client, realMaxSpeeds[client]);
+    new Float:acc = GetAcceleration(client, clRealMaxspeed[client]);
 
     if (acc > addspeed)
         acc = addspeed;
@@ -543,16 +541,16 @@ CheckGround(client)
 {
     if (GetEntityFlags(client) & FL_ONGROUND)
     {
-        landframe[client] = false;
-        if (inair[client])
+        clLandframe[client] = false;
+        if (clInAir[client])
         {
-            inair[client] = false;
-            landframe[client] = true;
+            clInAir[client] = false;
+            clLandframe[client] = true;
         }
     }
     else
     {
-        inair[client] = true;
+        clInAir[client] = true;
     }
 }
 // }}}
@@ -562,7 +560,7 @@ CheckGround(client)
 // Movement related {{{
 
 // Calculate the friction to subtract for a certain speed.
-// (virtframetime is not needed at this point, because there's no friction
+// (gVirtFrametime is not needed at this point, because there's no friction
 // in the air)
 Float:GetFrictionDrop(client, Float:speed)
 {
@@ -576,12 +574,12 @@ Float:GetAcceleration(client, Float:maxspeed)
 {
     // Water can be ignored I think (at least it works without special treatment)
     new Float:frametime;
-    if (inair[client] && virtframetime != 0.0)
-        frametime = virtframetime;
+    if (clInAir[client] && gVirtFrametime != 0.0)
+        frametime = gVirtFrametime;
     else
         frametime = GetTickInterval();
 
-    return (inair[client] ? sv_airaccelerate : sv_accelerate)
+    return (clInAir[client] ? sv_airaccelerate : sv_accelerate)
         * frametime * maxspeed * GetFriction(client);
 }
 
@@ -628,10 +626,10 @@ SetupClient(client)
     if (IsFakeClient(client) || client < 1 || client > MAXPLAYERS)
         return;
 
-    autohop[client] = allowAutohop;
-    showSpeed[client] = defaultSpeedo;
-    oldbuttons[client] = 0;
-    virtticks[client] = 0.0;
+    clAutohop[client] = gAllowAutohop;
+    clShowSpeedo[client] = gDefaultSpeedo;
+    clOldButtons[client] = 0;
+    clVirtTicks[client] = 0.0;
     SDKHook(client, SDKHook_PreThink, OnPreThink);
     SDKHook(client, SDKHook_PostThink, OnPostThink);
 }
