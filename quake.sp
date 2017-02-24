@@ -1,6 +1,7 @@
 #include <sourcemod>
 #include <sdktools>
 #include <sdkhooks>
+#include <clientprefs>
 
 #pragma semicolon 1
 
@@ -45,6 +46,11 @@ new Handle:cvarAirAccelerate    = INVALID_HANDLE;
 
 // Sync HUD handle
 new Handle:hndSpeedo = INVALID_HANDLE;
+
+// Cookies
+new Handle:cookieFov     = INVALID_HANDLE;
+new Handle:cookieAutohop = INVALID_HANDLE;
+new Handle:cookieSpeedo  = INVALID_HANDLE;
 
 // Global settings
 // (These are initialized in OnPluginStart())
@@ -113,6 +119,8 @@ public Action:ToggleAutohop(client, args)
                 ReplyToCommand(client, "%s Autohopping enabled", PLUGIN_PREFIX);
             else
                 ReplyToCommand(client, "%s Autohopping disabled", PLUGIN_PREFIX);
+
+            SetCookieInt(client, cookieAutohop, clAutohop[client]);
         }
     }
     else
@@ -135,46 +143,39 @@ public Action:ToggleSpeedo(client, args)
         else
 #endif
             PrintCenterText(client, "");
+
+        SetCookieInt(client, cookieSpeedo, clShowSpeedo[client]);
     }
     return Plugin_Handled;
 }
 
-public Action:SetFov(client, args)
+public Action:CmdSetFov(client, args)
 {
     if (!gEnabled)
         return Plugin_Continue;
 
     if (args > 0)
     {
-        new String:buf[5];
+        new String:buf[7];
         GetCmdArg(1, buf, sizeof(buf));
-        new fov = StringToInt(buf), type = 0;
 
-        if (args > 1)
+        if (StrEqual(buf, "reset", false))
         {
-            GetCmdArg(2, buf, sizeof(buf));
-            if (strcmp(buf, "hand", false) == 0)
-                type = 1;
-            else if (strcmp(buf, "view", false) == 0)
-                type = 2;
-            else
-                fov = 0; // Show usage info
+            ReplyToCommand(client, "%s Reset takes effect after respawn", PLUGIN_PREFIX);
+            SetCookieInt(client, cookieFov, 0);
+            return Plugin_Handled;
         }
 
-        if (fov != 0)
+        new fov = StringToInt(buf);
+        if (fov > 0)
         {
-            if (type == 0 || type == 2)
-                SetEntProp(client, Prop_Send, "m_iFOV", fov); // camera
-
-            if (type == 0 || type == 1)
-                SetEntProp(client, Prop_Send, "m_iDefaultFOV", fov); // hand
-
+            SetFov(client, fov);
+            SetCookieInt(client, cookieFov, fov);
             return Plugin_Handled;
         }
     }
 
-    ReplyToCommand(client, "%s Syntax: fov <number> [view|hand]", PLUGIN_PREFIX);
-
+    ReplyToCommand(client, "%s Syntax: sm_fov <number|reset>", PLUGIN_PREFIX);
     return Plugin_Handled;
 }
 // }}}
@@ -279,7 +280,11 @@ public OnPluginStart()
 {
     RegConsoleCmd("sm_speed", ToggleSpeedo, "Toggle speedometer on/off");
     RegConsoleCmd("sm_autohop", ToggleAutohop, "Toggle autohopping on/off");
-    RegConsoleCmd("sm_fov", SetFov, "Set Field of View to a custom value");
+    RegConsoleCmd("sm_fov", CmdSetFov, "Set Field of View to a custom value");
+
+    cookieFov     = RegClientCookie("qm_cookie_fov", "FOV", CookieAccess_Protected);
+    cookieAutohop = RegClientCookie("qm_cookie_autohop", "Autohop", CookieAccess_Protected);
+    cookieSpeedo  = RegClientCookie("qm_cookie_speedo", "Speedometer", CookieAccess_Protected);
 
     CreateConVar("quakemovement_version", PLUGIN_VERSION, "Quake Movement version", FCVAR_SPONLY | FCVAR_NOTIFY | FCVAR_DONTRECORD);
     cvarEnabled    = CreateConVar("qm_enabled",       "1", "Enable/Disable Quake movement.");
@@ -335,13 +340,28 @@ public OnPluginStart()
     AutoExecConfig(true);
 
     for (new i = 1; i <= MaxClients; i++)
+    {
         if (IsClientConnected(i))
             SetupClient(i);
+
+        if (AreClientCookiesCached(i))
+            LoadCookies(i);
+    }
 }
 
 public OnClientPutInServer(client)
 {
     SetupClient(client);
+}
+
+public OnClientCookiesCached(client)
+{
+    LoadCookies(client);
+}
+
+public OnSpawnPost(client)
+{
+    SetFov(client, GetCookieInt(client, cookieFov, 0));
 }
 
 public OnPreThink(client)
@@ -761,12 +781,25 @@ SetupClient(client)
 
     clCustomMaxspeed[client] = 0.0;
     clVirtTicks[client] = 0.0;
-    clAutohop[client] = gAllowAutohop;
-    clShowSpeedo[client] = gDefaultSpeedo;
     clOldButtons[client] = 0;
 
     SDKHook(client, SDKHook_PreThink, OnPreThink);
     SDKHook(client, SDKHook_PostThink, OnPostThink);
+    SDKHook(client, SDKHook_SpawnPost, OnSpawnPost);
+}
+
+LoadCookies(client)
+{
+    if (IsFakeClient(client) || client < 1 || client > MAXPLAYERS)
+        return;
+
+    clShowSpeedo[client] = !!GetCookieInt(client, cookieSpeedo, gDefaultSpeedo);
+
+    if (IsClientInGame(client))
+        SetFov(client, GetCookieInt(client, cookieFov, 0));
+
+    if (gAllowAutohop)
+        clAutohop[client] = !!GetCookieInt(client, cookieAutohop, 1);
 }
 
 GetVelocity(client, Float:vel[3])
@@ -796,6 +829,15 @@ Float:SetMaxSpeed(client, Float:speed)
     SetEntPropFloat(client, Prop_Data, "m_flMaxspeed", speed);
 }
 
+SetFov(client, fov)
+{
+    if (fov > 0)
+    {
+        SetEntProp(client, Prop_Send, "m_iFOV", fov);
+        SetEntProp(client, Prop_Send, "m_iDefaultFOV", fov);
+    }
+}
+
 bool:HandleBoolCommand(client, args, const String:cmd[], bool:variable[])
 {
     if (args == 0)
@@ -805,9 +847,9 @@ bool:HandleBoolCommand(client, args, const String:cmd[], bool:variable[])
         new String:buf[5];
         GetCmdArg(1, buf, sizeof(buf));
 
-        if (strcmp(buf, "on", false) == 0)
+        if (StrEqual(buf, "on", false))
             variable[client] = true;
-        else if (strcmp(buf, "off", false) == 0)
+        else if (StrEqual(buf, "off", false))
             variable[client] = false;
         else
         {
@@ -817,6 +859,20 @@ bool:HandleBoolCommand(client, args, const String:cmd[], bool:variable[])
     }
 
     return true;
+}
+
+GetCookieInt(client, Handle:cookie, def)
+{
+    decl String:buf[12];
+    GetClientCookie(client, cookie, buf, sizeof(buf));
+    return StrEqual(buf, "") ? def : StringToInt(buf);
+}
+
+SetCookieInt(client, Handle:cookie, val)
+{
+    decl String:buf[12];
+    IntToString(val, buf, sizeof(buf));
+    SetClientCookie(client, cookie, buf);
 }
 
 public bool:TR_FilterSelf(ent, mask, any:data)
