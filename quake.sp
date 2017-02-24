@@ -4,8 +4,17 @@
 
 #pragma semicolon 1
 
-// Source: Measuring
+// Found by trial and error
 #define JUMP_SPEED 283.0
+
+// Distance the player will be shifted upwards when releasing duck before being
+// completely ducked.
+// Found by comparing player maxs when standing and crouching.
+#define DOUBLE_DUCK_HEIGHT 20
+
+// Values <= this value won't make the player lift up from ground
+// Found by trial and error
+#define DOUBLE_DUCK_HEIGHT_OFFSET 22
 
 // https://github.com/ValveSoftware/source-sdk-2013/blob/master/mp/src/game/shared/gamemovement.h#L104
 #define AIR_CAP 30.0
@@ -22,6 +31,7 @@ new Handle:cvarAutohop      = INVALID_HANDLE;
 new Handle:cvarSpeedo       = INVALID_HANDLE;
 new Handle:cvarMaxspeed     = INVALID_HANDLE;
 new Handle:cvarDuckJump     = INVALID_HANDLE;
+new Handle:cvarDoubleDuck   = INVALID_HANDLE;
 new Handle:cvarFrametime    = INVALID_HANDLE;
 new Handle:cvarUseAdvHud    = INVALID_HANDLE;
 new Handle:cvarHudColor     = INVALID_HANDLE;
@@ -40,6 +50,7 @@ new bool:gEnabled           = true;
 new bool:gAllowAutohop      = true;
 new bool:gDefaultSpeedo     = false;
 new bool:gDuckjump          = true;
+new bool:gDoubleDuck        = true;
 new bool:gUseAdvHud         = true;
 new Float:gSpeedcap         = -1.0;
 new Float:gVirtFrametime    = 0.01; // 100 tickrate
@@ -143,6 +154,11 @@ public ChangeDuckJump(Handle:convar, const String:oldValue[], const String:newVa
     gDuckjump = GetConVarBool(convar);
 }
 
+public ChangeDoubleDuck(Handle:convar, const String:oldValue[], const String:newValue[])
+{
+    gDoubleDuck = GetConVarBool(convar);
+}
+
 public ChangeAutohop(Handle:convar, const String:oldValue[], const String:newValue[])
 {
     if (gAllowAutohop != GetConVarBool(convar))
@@ -223,14 +239,15 @@ public OnPluginStart()
     RegConsoleCmd("sm_autohop", toggleAutohop, "Toggle autohopping on/off");
 
     CreateConVar("quakemovement_version", PLUGIN_VERSION, "Quake Movement version", FCVAR_SPONLY | FCVAR_NOTIFY | FCVAR_DONTRECORD);
-    cvarEnabled   = CreateConVar("qm_enabled",       "1", "Enable/Disable Quake movement.");
-    cvarAutohop   = CreateConVar("qm_allow_autohop", "1", "Allow users to jump automatically by holding jump.");
-    cvarSpeedo    = CreateConVar("qm_speedo",        "0", "Show speedometer by default.");
-    cvarDuckJump  = CreateConVar("qm_duckjump",      "1", "Allow jumping while being ducked.");
-    cvarMaxspeed  = CreateConVar("qm_speedcap",   "-1.0", "The maximum speed players can reach. -1 for unlimited.");
-    cvarFrametime = CreateConVar("qm_frametime",  "0.01", "Virtual frametime (in seconds) to simulate a higher tickrate. 0 to disable. Values higher than 0.015 have no effect.");
-    cvarUseAdvHud = CreateConVar("qm_advanced_hud",  "1", "Whether or not to use an advanced speedometer HUD.");
-    cvarHudColor  = CreateConVar("qm_hud_color", "255 255 0", "Speedometer HUD color. Syntax: qm_hud_color \"R G B\"");
+    cvarEnabled    = CreateConVar("qm_enabled",       "1", "Enable/Disable Quake movement.");
+    cvarAutohop    = CreateConVar("qm_allow_autohop", "1", "Allow users to jump automatically by holding jump.");
+    cvarSpeedo     = CreateConVar("qm_speedo",        "0", "Show speedometer by default.");
+    cvarDuckJump   = CreateConVar("qm_duckjump",      "1", "Allow jumping while being ducked.");
+    cvarDoubleDuck = CreateConVar("qm_doubleduck",    "1", "Allow double ducking.");
+    cvarMaxspeed   = CreateConVar("qm_speedcap",   "-1.0", "The maximum speed players can reach. -1 for unlimited.");
+    cvarFrametime  = CreateConVar("qm_frametime",  "0.01", "Virtual frametime (in seconds) to simulate a higher tickrate. 0 to disable. Values higher than 0.015 have no effect.");
+    cvarUseAdvHud  = CreateConVar("qm_advanced_hud",  "1", "Whether or not to use an advanced speedometer HUD.");
+    cvarHudColor   = CreateConVar("qm_hud_color", "255 255 0", "Speedometer HUD color. Syntax: qm_hud_color \"R G B\"");
 
     cvarFriction      = FindConVar("sv_friction");
     cvarStopspeed     = FindConVar("sv_stopspeed");
@@ -241,6 +258,7 @@ public OnPluginStart()
     HookConVarChange(cvarAutohop, ChangeAutohop);
     HookConVarChange(cvarSpeedo, ChangeSpeedo);
     HookConVarChange(cvarDuckJump, ChangeDuckJump);
+    HookConVarChange(cvarDoubleDuck, ChangeDoubleDuck);
     HookConVarChange(cvarMaxspeed, ChangeMaxspeed);
     HookConVarChange(cvarFrametime, ChangeFrametime);
     HookConVarChange(cvarUseAdvHud, ChangeHudType);
@@ -255,6 +273,7 @@ public OnPluginStart()
     ChangeAutohop       (cvarAutohop, "", "");
     ChangeSpeedo        (cvarSpeedo, "", "");
     ChangeDuckJump      (cvarDuckJump, "", "");
+    ChangeDoubleDuck    (cvarDoubleDuck, "", "");
     ChangeMaxspeed      (cvarMaxspeed, "", "");
     ChangeFrametime     (cvarFrametime, "", "");
     ChangeHudType       (cvarUseAdvHud, "", "");
@@ -337,6 +356,7 @@ public DoStuffPre(client)
 
     CheckGround(client);
     HandleJumping(client, buttons, vel);
+    HandleDoubleDucking(client, buttons);
     DoInterpolation(client, buttons, wishdir, vel);
 
     if (!clInAir[client])
@@ -472,6 +492,31 @@ HandleJumping(client, buttons, Float:vel[3])
             vel[2] = JUMP_SPEED;
             TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, vel);
         }
+    }
+}
+
+// Replicates the behaviour described here:
+// http://tastools.readthedocs.io/en/latest/basicphy.html#ducking-physics
+HandleDoubleDucking(client, buttons)
+{
+    if (!gDoubleDuck)
+        return;
+
+    if (clOldButtons[client] & IN_DUCK && buttons & IN_DUCK == 0
+            && GetDuckState(client) == 1)
+    {
+        decl Float:origin[3], Float:dest[3], Float:mins[3], Float:maxs[3];
+        GetClientAbsOrigin(client, origin);
+        GetClientAbsOrigin(client, dest);
+        GetClientMins(client, mins);
+        GetClientMaxs(client, maxs);
+        dest[2] += DOUBLE_DUCK_HEIGHT_OFFSET +
+            DOUBLE_DUCK_HEIGHT * GetEntPropFloat(client, Prop_Send, "m_flModelScale");
+
+        TR_TraceHullFilter(origin, dest, mins, maxs, MASK_SOLID, TR_FilterSelf, client);
+
+        if (!TR_DidHit(INVALID_HANDLE))
+            TeleportEntity(client, dest, NULL_VECTOR, NULL_VECTOR);
     }
 }
 
@@ -667,6 +712,20 @@ bool:InWater(client)
     return !!(GetEntityFlags(client) & FL_INWATER);
 }
 
+GetDuckState(client)
+{
+    new ducked = GetEntityFlags(client) & FL_DUCKING;
+    new ducking = GetEntProp(client, Prop_Send, "m_bDucking");
+
+    if (!ducking && !ducked) // Standing
+        return 0;
+    if (ducking && !ducked)  // Ducking in progress
+        return 1;
+    if (!ducking && ducked)  // Fully crouched
+        return 2;
+    return 3; // Standing up after being fully crouched
+}
+
 Float:GetMaxSpeed(client)
 {
     return GetEntPropFloat(client, Prop_Data, "m_flMaxspeed");
@@ -701,6 +760,11 @@ bool:HandleBoolCommand(client, args, const String:cmd[], bool:variable[])
     }
 
     return true;
+}
+
+public bool:TR_FilterSelf(ent, mask, any:data)
+{
+    return ent != data;
 }
 // }}}
 
