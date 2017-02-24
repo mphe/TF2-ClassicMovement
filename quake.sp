@@ -293,7 +293,7 @@ public OnPluginStart()
     cvarDuckJump   = CreateConVar("qm_duckjump",      "1", "Allow jumping while being fully crouched.");
     cvarDoubleDuck = CreateConVar("qm_doubleduck",    "1", "Allow double ducking.");
     cvarMaxspeed   = CreateConVar("qm_speedcap",   "-1.0", "The maximum speed players can reach. -1 for unlimited.");
-    cvarFrametime  = CreateConVar("qm_frametime",  "0.01", "Virtual frametime (in seconds) to simulate a higher tickrate. 0 to disable. Values higher than 0.015 have no effect.");
+    cvarFrametime  = CreateConVar("qm_frametime", "0.009", "Virtual frametime (in seconds) to simulate a higher tickrate. 0 to disable. Values higher than 0.015 have no effect.");
     cvarUseAdvHud  = CreateConVar("qm_advanced_hud",  "1", "Whether or not to use a nicer speedometer HUD.");
     cvarHudColor   = CreateConVar("qm_hud_color", "255 255 0", "Speedometer HUD color. Syntax: qm_hud_color \"R G B\"");
 
