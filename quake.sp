@@ -35,7 +35,7 @@ new Handle:cvarMaxspeed     = INVALID_HANDLE;
 new Handle:cvarDuckJump     = INVALID_HANDLE;
 new Handle:cvarDoubleDuck   = INVALID_HANDLE;
 new Handle:cvarFrametime    = INVALID_HANDLE;
-new Handle:cvarUseAdvHud    = INVALID_HANDLE;
+new Handle:cvarUseNiceHud   = INVALID_HANDLE;
 new Handle:cvarHudColor     = INVALID_HANDLE;
 
 // Engine cvars
@@ -59,7 +59,7 @@ new bool:gAllowAutohop;
 new bool:gDefaultSpeedo;
 new bool:gDuckjump;
 new bool:gDoubleDuck;
-new bool:gUseAdvHud;
+new bool:gUseNiceHud;
 new Float:gSpeedcap;
 new Float:gVirtFrametime;
 new gHudColor[3];
@@ -104,7 +104,6 @@ public Plugin:myinfo = {
 };
 // }}}
 
-
 // Commands {{{
 public Action:ToggleAutohop(client, args)
 {
@@ -138,7 +137,7 @@ public Action:ToggleSpeedo(client, args)
     if (HandleBoolCommand(client, args, "sm_speed", clShowSpeedo))
     {
 #if !defined DEBUG
-        if (gUseAdvHud)
+        if (gUseNiceHud)
             ClearSyncHud(client, hndSpeedo);
         else
 #endif
@@ -179,7 +178,6 @@ public Action:CmdSetFov(client, args)
     return Plugin_Handled;
 }
 // }}}
-
 
 // Convar changed hooks {{{
 public ChangeEnabled(Handle:convar, const String:oldValue[], const String:newValue[])
@@ -232,13 +230,13 @@ public ChangeFrametime(Handle:convar, const String:oldValue[], const String:newV
 
 public ChangeHudType(Handle:convar, const String:oldValue[], const String:newValue[])
 {
-    gUseAdvHud = GetConVarBool(convar);
+    gUseNiceHud = GetConVarBool(convar);
 
-    if (gUseAdvHud && hndSpeedo == INVALID_HANDLE)
+    if (gUseNiceHud && hndSpeedo == INVALID_HANDLE)
     {
         hndSpeedo = CreateHudSynchronizer();
         if (hndSpeedo == INVALID_HANDLE)
-            gUseAdvHud = false;
+            gUseNiceHud = false;
     }
 }
 
@@ -274,8 +272,7 @@ public ChangeAirAccelerate(Handle:convar, const String:oldValue[], const String:
 }
 // }}}
 
-
-// Events {{{
+// Init Events {{{
 public OnPluginStart()
 {
     RegConsoleCmd("sm_speed", ToggleSpeedo, "Toggle speedometer on/off");
@@ -294,7 +291,7 @@ public OnPluginStart()
     cvarDoubleDuck = CreateConVar("qm_doubleduck",    "1", "Allow double ducking.");
     cvarMaxspeed   = CreateConVar("qm_speedcap",   "-1.0", "The maximum speed players can reach. -1 for unlimited.");
     cvarFrametime  = CreateConVar("qm_frametime", "0.009", "Virtual frametime (in seconds) to simulate a higher tickrate. 0 to disable. Values higher than 0.015 have no effect.");
-    cvarUseAdvHud  = CreateConVar("qm_advanced_hud",  "1", "Whether or not to use a nicer speedometer HUD.");
+    cvarUseNiceHud = CreateConVar("qm_use_nice_hud",  "1", "Whether or not to use a nicer speedometer HUD.");
     cvarHudColor   = CreateConVar("qm_hud_color", "255 255 0", "Speedometer HUD color. Syntax: qm_hud_color \"R G B\"");
 
     cvarFriction      = FindConVar("sv_friction");
@@ -314,7 +311,7 @@ public OnPluginStart()
     HookConVarChange(cvarDoubleDuck, ChangeDoubleDuck);
     HookConVarChange(cvarMaxspeed, ChangeMaxspeed);
     HookConVarChange(cvarFrametime, ChangeFrametime);
-    HookConVarChange(cvarUseAdvHud, ChangeHudType);
+    HookConVarChange(cvarUseNiceHud, ChangeHudType);
     HookConVarChange(cvarHudColor, ChangeHudColor);
     HookConVarChange(cvarFriction, ChangeFriction);
     HookConVarChange(cvarStopspeed, ChangeStopspeed);
@@ -329,7 +326,7 @@ public OnPluginStart()
     ChangeDoubleDuck    (cvarDoubleDuck, "", "");
     ChangeMaxspeed      (cvarMaxspeed, "", "");
     ChangeFrametime     (cvarFrametime, "", "");
-    ChangeHudType       (cvarUseAdvHud, "", "");
+    ChangeHudType       (cvarUseNiceHud, "", "");
     ChangeHudColor      (cvarHudColor, "", "");
 
     ChangeFriction      (cvarFriction, "", "");
@@ -363,59 +360,14 @@ public OnSpawnPost(client)
 {
     SetFov(client, GetCookieInt(client, cookieFov, 0));
 }
+// }}}
 
+// Main {{{
 public OnPreThink(client)
 {
     if (!gEnabled || !IsClientInGame(client) || !IsPlayerAlive(client))
         return;
-    DoStuffPre(client);
-}
 
-public OnPostThink(client)
-{
-    if (!gEnabled || !IsClientInGame(client) || !IsPlayerAlive(client))
-        return;
-    DoStuffPost(client);
-}
-// }}}
-
-
-// Main {{{
-public DoStuffPost(client)
-{
-    // Catch weapon related speed boosts (they don't appear in PreThink)
-    if (GetMaxSpeed(client) != clCustomMaxspeed[client])
-        clRealMaxspeed[client] = GetMaxSpeed(client);
-
-    decl Float:vel[3];
-    GetVelocity(client, vel);
-
-    // Speed correction
-    {
-        new Float:speed = GetAbsVec(vel);
-
-        // Restore speed if above 520
-        if (!clInAir[client] && clBackupSpeed[client] > 520.0)
-        {
-            ScaleVec(vel, clBackupSpeed[client] / speed);
-            DoFriction(client, vel);
-            TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, vel);
-        }
-        else if (gSpeedcap >= 0.0 && speed > gSpeedcap)
-        {
-            ScaleVec(vel, gSpeedcap / speed);
-            TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, vel);
-        }
-    }
-
-    ShowSpeedo(client, vel);
-
-    // Reset max speed
-    SetMaxSpeed(client, clRealMaxspeed[client]);
-}
-
-public DoStuffPre(client)
-{
     clRealMaxspeed[client] = GetMaxSpeed(client);
 
     new buttons = GetClientButtons(client);
@@ -445,6 +397,42 @@ public DoStuffPre(client)
     if (debugAngle > 30)
         debugAngle = 45 - debugAngle;
 #endif
+}
+
+public OnPostThink(client)
+{
+    if (!gEnabled || !IsClientInGame(client) || !IsPlayerAlive(client))
+        return;
+
+    // Catch weapon related speed boosts (they don't appear in PreThink)
+    if (GetMaxSpeed(client) != clCustomMaxspeed[client])
+        clRealMaxspeed[client] = GetMaxSpeed(client);
+
+    decl Float:vel[3];
+    GetVelocity(client, vel);
+
+    // Speed correction
+    {
+        new Float:speed = GetAbsVec(vel);
+
+        // Restore speed if above 520
+        if (!clInAir[client] && clBackupSpeed[client] > 520.0)
+        {
+            ScaleVec(vel, clBackupSpeed[client] / speed);
+            DoFriction(client, vel);
+            TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, vel);
+        }
+        else if (gSpeedcap >= 0.0 && speed > gSpeedcap) // Cap speed
+        {
+            ScaleVec(vel, gSpeedcap / speed);
+            TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, vel);
+        }
+    }
+
+    ShowSpeedo(client, vel);
+
+    // Reset max speed
+    SetMaxSpeed(client, clRealMaxspeed[client]);
 }
 
 DoMovement(client, Float:vel[3], const Float:wishdir[3], bool:handleMaxspeed)
@@ -513,7 +501,7 @@ DoInterpolation(client, buttons, const Float:wishdir[3], Float:vel[3])
 
     new Float:angle = GetVecAngle(wishdir);
 
-    // Extract movement keys only
+    // Extract movement keys
     new mvbuttons = buttons & (IN_FORWARD | IN_BACK | IN_MOVELEFT | IN_MOVERIGHT),
         oldmvbuttons = clOldButtons[client] & (IN_FORWARD | IN_BACK | IN_MOVELEFT | IN_MOVERIGHT);
 
@@ -633,7 +621,7 @@ ShowSpeedo(client, const Float:vel[3])
                 debugVirtTicks, clVirtTicks[client]
                 );
 #else
-        if (gUseAdvHud)
+        if (gUseNiceHud)
         {
             SetHudTextParams(-1.0, 0.8, 5.0, gHudColor[0], gHudColor[1], gHudColor[2], 255);
             ShowSyncHudText(client, hndSpeedo, "%i", RoundFloat(GetAbsVec(vel)));
@@ -693,7 +681,6 @@ CheckGround(client)
     }
 }
 // }}}
-
 
 // Helper functions {{{
 // Movement related {{{
