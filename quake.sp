@@ -138,6 +138,45 @@ public Action:ToggleSpeedo(client, args)
     }
     return Plugin_Handled;
 }
+
+public Action:SetFov(client, args)
+{
+    if (!gEnabled)
+        return Plugin_Continue;
+
+    if (args > 0)
+    {
+        new String:buf[5];
+        GetCmdArg(1, buf, sizeof(buf));
+        new fov = StringToInt(buf), type = 0;
+
+        if (args > 1)
+        {
+            GetCmdArg(2, buf, sizeof(buf));
+            if (strcmp(buf, "hand", false) == 0)
+                type = 1;
+            else if (strcmp(buf, "view", false) == 0)
+                type = 2;
+            else
+                fov = 0; // Show usage info
+        }
+
+        if (fov != 0)
+        {
+            if (type == 0 || type == 2)
+                SetEntProp(client, Prop_Send, "m_iFOV", fov); // camera
+
+            if (type == 0 || type == 1)
+                SetEntProp(client, Prop_Send, "m_iDefaultFOV", fov); // hand
+
+            return Plugin_Handled;
+        }
+    }
+
+    ReplyToCommand(client, "%s Syntax: fov <number> [view|hand]", PLUGIN_PREFIX);
+
+    return Plugin_Handled;
+}
 // }}}
 
 
@@ -240,6 +279,7 @@ public OnPluginStart()
 {
     RegConsoleCmd("sm_speed", ToggleSpeedo, "Toggle speedometer on/off");
     RegConsoleCmd("sm_autohop", ToggleAutohop, "Toggle autohopping on/off");
+    RegConsoleCmd("sm_fov", SetFov, "Set Field of View to a custom value");
 
     CreateConVar("quakemovement_version", PLUGIN_VERSION, "Quake Movement version", FCVAR_SPONLY | FCVAR_NOTIFY | FCVAR_DONTRECORD);
     cvarEnabled    = CreateConVar("qm_enabled",       "1", "Enable/Disable Quake movement.");
@@ -771,9 +811,7 @@ bool:HandleBoolCommand(client, args, const String:cmd[], bool:variable[])
             variable[client] = false;
         else
         {
-            decl String:reply[100];
-            Format(reply, 100, "%s Syntax: %s [on|off]", PLUGIN_PREFIX, cmd);
-            ReplyToCommand(client, reply);
+            ReplyToCommand(client, "%s Syntax: %s [on|off]", PLUGIN_PREFIX, cmd);
             return false;
         }
     }
