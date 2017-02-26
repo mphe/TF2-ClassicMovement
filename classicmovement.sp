@@ -23,7 +23,7 @@
 // #define DEBUG
 
 #define PLUGIN_VERSION "1.0.0"
-#define PLUGIN_PREFIX "[QM]"
+#define PLUGIN_PREFIX "[CM]"
 
 
 // Variables {{{
@@ -96,11 +96,11 @@ new debugVirtTicks;
 #endif
 
 public Plugin:myinfo = {
-    name            = "Quake Movement",
+    name            = "Classic Movement",
     author          = "mphe",
-    description     = "Quake/HL1 like movement",
+    description     = "Quake/Half-Life 1 like movement",
     version         = PLUGIN_VERSION,
-    url             = "https://github.com/mphe/tf2-quakemovement"
+    url             = "https://github.com/mphe/TF2-ClassicMovement"
 };
 // }}}
 
@@ -279,20 +279,20 @@ public OnPluginStart()
     RegConsoleCmd("sm_autohop", ToggleAutohop, "Toggle autohopping on/off");
     RegConsoleCmd("sm_fov", CmdSetFov, "Set Field of View to a custom value");
 
-    cookieFov     = RegClientCookie("qm_cookie_fov", "FOV", CookieAccess_Protected);
-    cookieAutohop = RegClientCookie("qm_cookie_autohop", "Autohop", CookieAccess_Protected);
-    cookieSpeedo  = RegClientCookie("qm_cookie_speedo", "Speedometer", CookieAccess_Protected);
+    cookieFov     = RegClientCookie("cm_cookie_fov", "FOV", CookieAccess_Protected);
+    cookieAutohop = RegClientCookie("cm_cookie_autohop", "Autohop", CookieAccess_Protected);
+    cookieSpeedo  = RegClientCookie("cm_cookie_speedo", "Speedometer", CookieAccess_Protected);
 
-    CreateConVar("quakemovement_version", PLUGIN_VERSION, "Quake Movement version", FCVAR_SPONLY | FCVAR_NOTIFY | FCVAR_DONTRECORD);
-    cvarEnabled    = CreateConVar("qm_enabled",       "1", "Enable/Disable Quake movement.");
-    cvarAutohop    = CreateConVar("qm_allow_autohop", "1", "Allow users to jump automatically by holding jump.");
-    cvarSpeedo     = CreateConVar("qm_speedo",        "0", "Show speedometer by default.");
-    cvarDuckJump   = CreateConVar("qm_duckjump",      "1", "Allow jumping while being fully crouched.");
-    cvarDoubleDuck = CreateConVar("qm_doubleduck",    "1", "Allow double ducking.");
-    cvarMaxspeed   = CreateConVar("qm_speedcap",   "-1.0", "The maximum speed players can reach. -1 for unlimited.");
-    cvarFrametime  = CreateConVar("qm_frametime", "0.009", "Virtual frametime (in seconds) to simulate a higher tickrate. 0 to disable. Values higher than 0.015 have no effect.");
-    cvarUseNiceHud = CreateConVar("qm_use_nice_hud",  "1", "Whether or not to use a nicer speedometer HUD.");
-    cvarHudColor   = CreateConVar("qm_hud_color", "255 255 0", "Speedometer HUD color. Syntax: qm_hud_color \"R G B\"");
+    CreateConVar("classicmovement_version", PLUGIN_VERSION, "Classic Movement version", FCVAR_SPONLY | FCVAR_NOTIFY | FCVAR_DONTRECORD);
+    cvarEnabled    = CreateConVar("cm_enabled",       "1", "Enable/Disable Classic Movement.");
+    cvarAutohop    = CreateConVar("cm_allow_autohop", "1", "Allow users to jump automatically by holding jump.");
+    cvarSpeedo     = CreateConVar("cm_speedo",        "0", "Show speedometer by default.");
+    cvarDuckJump   = CreateConVar("cm_duckjump",      "1", "Allow jumping while being fully crouched.");
+    cvarDoubleDuck = CreateConVar("cm_doubleduck",    "1", "Allow double ducking.");
+    cvarMaxspeed   = CreateConVar("cm_speedcap",   "-1.0", "The maximum speed players can reach. -1 for unlimited.");
+    cvarFrametime  = CreateConVar("cm_frametime", "0.009", "Virtual frametime (in seconds) to simulate a higher tickrate. 0 to disable. Values higher than 0.015 have no effect.");
+    cvarUseNiceHud = CreateConVar("cm_use_nice_hud",  "1", "Whether or not to use a nicer speedometer HUD.");
+    cvarHudColor   = CreateConVar("cm_hud_color", "255 255 0", "Speedometer HUD color. Syntax: cm_hud_color \"R G B\"");
 
     cvarFriction      = FindConVar("sv_friction");
     cvarStopspeed     = FindConVar("sv_stopspeed");
