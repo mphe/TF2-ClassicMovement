@@ -34,10 +34,12 @@ This Sourcemod plugin brings back movement as it was in Quake or Half Life 1 bas
 * Small speedboosts when changing direction
 * Whatever movement results by combining any of these above
 
+You can find the AlliedModders thread [here](https://forums.alliedmods.net/showthread.php?p=2499264).
+
 ## Setup
 ### Installation
 
-Download [classicmovement.smx]() or compile it yourself and move it into your `addons/sourcemod/plugins/` folder.
+Download [classicmovement.smx](http://www.sourcemod.net/vbcompiler.php?file_id=161150) or compile it yourself and move it into your `addons/sourcemod/plugins/` folder.
 
 ### Configuration
 
@@ -60,11 +62,11 @@ The following convars exist:
 
 ### Commands
 
-| Command               | Description               |
-| ---------             | -------------             |
-| speed [on\|off]       | Show speedometer          |
-| autohop [on\|off]     | Toggle autohop (on/off)   |
-| fov \<number\|reset\> | Set FOV to a custom value.<br>Passing "reset" rather than a number will reset the FOV (after respawn). |
+| Command                  | Description               |
+| ---------                | -------------             |
+| sm_speed [on\|off]       | Show speedometer          |
+| sm_autohop [on\|off]     | Toggle autohop (on/off)   |
+| sm_fov \<number\|reset\> | Set FOV to a custom value.<br>Passing "reset" rather than a number will reset the FOV (after respawn). |
 
 These settings are stored across sessions.
 
@@ -275,8 +277,8 @@ None (for now).
 
 ## Links
 
-* [Allied Modders Thread]()
-* Related stuff
+* [AlliedModders Thread](https://forums.alliedmods.net/showthread.php?p=2499264)
+* Related stuff:
     * [Strafing Theory](http://web.archive.org/web/20080702202156/http://www.funender.com/quake/articles/strafing_theory.html)
     * [Wallstrafing](http://web.archive.org/web/20080617115254/http://www.funender.com/quake/articles/wall_strafing.html)
     * [Bunnyhopping from the Programmer's Perspective](http://flafla2.github.io/2015/02/14/bunnyhop.html)
