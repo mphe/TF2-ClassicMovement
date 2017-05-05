@@ -273,7 +273,7 @@ The following videos demonstrate the features of this plugin in comparison to th
 
 ## Bugs/Issues
 
-None (for now).
+* Jump Pads might not set speed for some reason
 
 ## Links
 
