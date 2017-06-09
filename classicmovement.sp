@@ -22,7 +22,7 @@
 
 // #define DEBUG
 
-#define PLUGIN_VERSION "1.0.0"
+#define PLUGIN_VERSION "1.0.1"
 #define PLUGIN_PREFIX "[CM]"
 
 
@@ -358,7 +358,7 @@ public OnClientCookiesCached(client)
 
 public OnSpawnPost(client)
 {
-    SetFov(client, GetCookieInt(client, cookieFov, 0));
+    UpdateFov(client);
 }
 // }}}
 
@@ -374,6 +374,10 @@ public OnPreThink(client)
     decl Float:vel[3], Float:wishdir[3];
     GetVelocity(client, vel);
     GetWishdir(client, buttons, wishdir);
+
+    // Check if the fov was reset by zooming
+    if (buttons & IN_ATTACK2 && GetEntProp(client, Prop_Send, "m_iFOV") == 0)
+        UpdateFov(client);
 
     CheckGround(client);
     HandleJumping(client, buttons, vel);
@@ -783,7 +787,7 @@ LoadCookies(client)
     clShowSpeedo[client] = !!GetCookieInt(client, cookieSpeedo, gDefaultSpeedo);
 
     if (IsClientInGame(client))
-        SetFov(client, GetCookieInt(client, cookieFov, 0));
+        UpdateFov(client);
 
     if (gAllowAutohop)
         clAutohop[client] = !!GetCookieInt(client, cookieAutohop, 1);
@@ -823,6 +827,11 @@ SetFov(client, fov)
         SetEntProp(client, Prop_Send, "m_iFOV", fov);
         SetEntProp(client, Prop_Send, "m_iDefaultFOV", fov);
     }
+}
+
+UpdateFov(client)
+{
+    SetFov(client, GetCookieInt(client, cookieFov, 0));
 }
 
 bool:HandleBoolCommand(client, args, const String:cmd[], bool:variable[])
@@ -917,4 +926,4 @@ VecFromAngle(Float:angle, Float:vec[])
 // }}}
 // }}}
 
-// vim: filetype=cpp foldmethod=marker
+// vim: filetype=sourcepawn foldmethod=marker

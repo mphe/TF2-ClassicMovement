@@ -274,6 +274,7 @@ The following videos demonstrate the features of this plugin in comparison to th
 ## Bugs/Issues
 
 * Jump Pads might not set speed for some reason
+* FOV might get reset by other stuff (until respawn or re-entering !fov command)
 
 ## Links
 
