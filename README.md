@@ -31,7 +31,7 @@ This Sourcemod plugin brings back movement as it was in Quake or Half Life 1 bas
 * Bunnyhopping
 * Jumping while being fully crouched
 * Double ducking
-* Small speedboosts when changing direction
+* Ground strafing
 * Whatever movement results by combining any of these above
 
 You can find the AlliedModders thread [here](https://forums.alliedmods.net/showthread.php?p=2499264).
@@ -39,7 +39,7 @@ You can find the AlliedModders thread [here](https://forums.alliedmods.net/showt
 ## Setup
 ### Installation
 
-Download [classicmovement.smx](http://www.sourcemod.net/vbcompiler.php?file_id=161150) or compile it yourself and move it into your `addons/sourcemod/plugins/` folder.
+Download [classicmovement.smx](https://www.sourcemod.net/vbcompiler.php?file_id=163318) or compile it yourself and move it into your `addons/sourcemod/plugins/` folder.
 
 ### Configuration
 
@@ -49,7 +49,7 @@ The following convars exist:
 
 | Variable                | Default     | Description                                                                                         |
 | ----------------------- | ----------- | --------------------------------------------------------------------------------------------------- |
-| classicmovement_version | 1.0.0       | Contains the plugin version (is a constant and can't be changed).                                   |
+| classicmovement_version | 1.0.1       | Contains the plugin version (is a constant and can't be changed).                                   |
 | cm_enabled              | 1           | Enable/Disable the plugin.                                                                          |
 | cm_speedo               | 0           | Show speedometer by default.                                                                        |
 | cm_duckjump             | 1           | Allow jumping while being fully crouched.                                                           |
@@ -269,7 +269,7 @@ The following videos demonstrate the features of this plugin in comparison to th
 
 ## Todo
 
-* (Maybe) Reuse `+use` as Duckroll/Duckspam key
+* (Maybe) Add an option to enable interpolation on ground for better pre-strafing
 
 ## Bugs/Issues
 
